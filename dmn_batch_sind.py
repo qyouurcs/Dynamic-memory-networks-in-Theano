@@ -2,8 +2,9 @@ import random
 import numpy as np
 
 import theano
-import theano.tensor as T
+#import theano.tensor as T
 from theano.compile.nanguardmode import NanGuardMode
+from theano import tensor as T, function, printing
 
 import lasagne
 from lasagne import layers
@@ -57,7 +58,7 @@ class DMN_batch:
         self.vocab_size = len(self.vocab)
         
         self.input_var = T.tensor3('input_var') # (batch_size, seq_len, cnn_dim)
-        self.q_var = T.matrix('question_var') # Now, it's a batch * image_sieze.
+        self.q_var = T.matrix('q_var') # Now, it's a batch * image_sieze.
         self.answer_var = T.imatrix('answer_var') # answer of example in minibatch
         self.answer_mask = T.matrix('answer_mask')
         self.answer_inp_var = T.tensor3('answer_inp_var') # answer of example in minibatch
@@ -70,15 +71,21 @@ class DMN_batch:
 
         #inp_c_hist = T.dot(self.W_inp_emb_in, self.input_var) + self.b_inp_emb_in
         inp_var_shuffled = self.input_var.dimshuffle(1,2,0)
+        print inp_var_shuffled.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32')})
         def _dot(x, W, b):
             return  T.dot(W, x) + b.dimshuffle(0, 'x')
-        inp_c_hist,_ = theano.scan(fn = _dot, sequences=inp_var_shuffled, non_sequences = [self.W_inp_emb_in, self.b_inp_emb_in])
 
-        self.inp_c = inp_c_hist.dimshuffle(2,0,1) # b x len x fea
+        inp_c_hist,_ = theano.scan(fn = _dot, sequences=inp_var_shuffled, non_sequences = [self.W_inp_emb_in, self.b_inp_emb_in])
+        #inp_c_hist,_ = theano.scan(fn = _dot, sequences=self.input_var, non_sequences = [self.W_inp_emb_in, self.b_inp_emb_in])
+
+        #self.inp_c = inp_c_hist.dimshuffle(2,0,1) # b x len x fea
+        self.inp_c = inp_c_hist
 
         print "==> building question module"
         # Now, share the parameter with the input module.
-        self.q_q = T.dot(self.W_inp_emb_in, self.q_var) + self.b_inp_emb_in
+        q_var_shuffled = self.q_var.dimshuffle(1,0)
+        q_hist = T.dot(self.W_inp_emb_in, q_var_shuffled) + self.b_inp_emb_in.dimshuffle(0,'x')
+        self.q_q = q_hist.dimshuffle(0,1)
         
         print "==> creating parameters for memory module"
         self.W_mem_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
@@ -102,8 +109,12 @@ class DMN_batch:
 
         print "==> building episodic memory module (fixed number of steps: %d)" % self.memory_hops
         memory = [self.q_q.copy()]
+        #memory = printing.Print('Hello World')(memory)
         for iter in range(1, self.memory_hops + 1):
-            current_episode = self.new_episode(memory[iter - 1])
+            m = printing.Print('mem')(memory[iter-1])
+            #current_episode = self.new_episode(memory[iter - 1])
+            current_episode = self.new_episode(m)
+            current_episode = printing.Print('current_episode')(current_episode)
             memory.append(self.GRU_update(memory[iter - 1], current_episode,
                                           self.W_mem_res_in, self.W_mem_res_hid, self.b_mem_res, 
                                           self.W_mem_upd_in, self.W_mem_upd_hid, self.b_mem_upd,
@@ -112,44 +123,71 @@ class DMN_batch:
         last_mem_raw = memory[-1].dimshuffle((1, 0))
         
         net = layers.InputLayer(shape=(self.batch_size, self.dim), input_var=last_mem_raw)
+
         if self.batch_norm:
             net = layers.BatchNormLayer(incoming=net)
         if self.dropout > 0 and self.mode == 'train':
             net = layers.DropoutLayer(net, p=self.dropout)
         last_mem = layers.get_output(net).dimshuffle((1, 0))
-        
-        
+
+        logging.info('last_mem size')
+        print last_mem.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32'),
+            self.q_var: np.random.rand(10, 4096).astype('float32')})
+       
         print "==> building answer module"
 
         answer_inp_var_shuffled = self.answer_inp_var.dimshuffle(1,2,0)
-        dummy = theano.shared(np.zeros((self.vocab_size, self.batch_size), dtype=floatX))
+        # because we have the additional #start token. Thus, we need to add this +1 for all the parameters as well.
+        dummy = theano.shared(np.zeros((self.vocab_size + 1, self.batch_size), dtype=floatX))
 
-        self.W_a = nn_utils.normal_param(std=0.1, shape=(self.vocab_size, self.dim))
+        self.W_a = nn_utils.normal_param(std=0.1, shape=(self.vocab_size + 1, self.dim))
         
-        self.W_ans_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size))
+        self.W_ans_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size +1))
         self.W_ans_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_ans_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size))
+        self.W_ans_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size +1))
         self.W_ans_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_ans_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size))
+        self.W_ans_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size +1))
         self.W_ans_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+
+        logging.info('answer_inp_var_shuffled size')
+
+        print answer_inp_var_shuffled.shape.eval({self.answer_inp_var: np.random.rand(10, 18, 8001).astype('float32')})
         
+        #last_mem = printing.Print('prob_sm')(last_mem)
         results, _ = theano.scan(fn = self.answer_gru_step,
                 sequences = answer_inp_var_shuffled,
                 outputs_info = [ last_mem ])
         # Assume there is a start token 
+        print results.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32'),
+            self.q_var: np.random.rand(10, 4096).astype('float32'), 
+            self.answer_inp_var: np.random.rand(10, 18, 8001).astype('float32')})
         results = results[0:-1,:,:] # get rid of the last token.
-        self.prediction = results
+        print results.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32'),
+            self.q_var: np.random.rand(10, 4096).astype('float32'), 
+            self.answer_inp_var: np.random.rand(10, 18, 8001).astype('float32')})
+            
+        # Now, we need to transform it to the probabilities.
+
+        prob,_ = theano.scan(fn = lambda x, w: T.dot(w, x), sequences = results, non_sequences = self.W_a )
+
+        prob_shuffled = prob.dimshuffle(2,0,1) # b * len * vocab
 
 
-        results_shuffled = results.dimshuffle(2,0,1) # b * len * vocab
+        logging.info("prob shape.")
+        print prob.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32'),
+            self.q_var: np.random.rand(10, 4096).astype('float32'), 
+            self.answer_inp_var: np.random.rand(10, 18, 8001).astype('float32')})
 
-        n = results.shape[0] * results.shape[1]
-        results_rhp = T.reshape(results_shuffled, (n, results.shape[2]))
+        n = prob_shuffled.shape[0] * prob_shuffled.shape[1]
+        prob_rhp = T.reshape(prob_shuffled, (n, prob_shuffled.shape[2]))
+        prob_sm = nn_utils.softmax(prob_rhp)
+        self.prediction = prob_sm
+
         mask =  T.reshape(self.answer_mask, (n,))
         lbl = T.reshape(self.answer_var, (n,))
 
@@ -165,7 +203,7 @@ class DMN_batch:
                               
                               
         print "==> building loss layer and computing updates"
-        loss_vec = T.nnet.categorical_crossentropy(results_rhp, lbl)
+        loss_vec = T.nnet.categorical_crossentropy(prob_sm, lbl)
         self.loss_ce = (mask * loss_vec ).sum() / mask.sum() 
 
         #self.loss_ce = T.nnet.categorical_crossentropy(results_rhp, lbl)
@@ -224,12 +262,12 @@ class DMN_batch:
                                      self.W_inp_hid_in, self.W_inp_hid_hid, self.b_inp_hid)
     
     def answer_gru_step(self, x, prev_h):
-        p = self.GRU_update(prev_h, x, self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
+        return self.GRU_update(prev_h, x, self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
                                      self.W_ans_upd_in, self.W_ans_upd_hid, self.b_ans_upd,
                                      self.W_ans_hid_in, self.W_ans_hid_hid, self.b_ans_hid)
     
-        y = nn_utils.softmax(T.dot(self.W_a, p))
-        return y
+        #y = nn_utils.softmax(T.dot(self.W_a, p))
+        #return y
     
     def new_attention_step(self, ct, prev_g, mem, q_q):
         z = T.concatenate([ct, mem, q_q, ct * q_q, ct * mem, (ct - q_q) ** 2, (ct - mem) ** 2], axis=0)
@@ -375,9 +413,14 @@ class DMN_batch:
         questions = np.array(questions).astype(floatX)
         answers = np.array(answers).astype(np.int32)
         answers_mask = np.array(answers_mask).astype(floatX)
+        print answers_mask
         answers_inp = np.stack(answers_inp, axis = 0)
 
-        print inputs.shape
+        print 'inputs', inputs.shape
+        print 'questions', questions.shape
+        print 'answers',answers.shape
+        print 'answers_inp', answers_inp.shape
+        print 'answers_mask',answers_mask.shape
         return inputs, questions, answers, answers_inp, answers_mask
    
     
@@ -603,7 +646,7 @@ class DMN_batch:
             theano_fn = self.test_fn 
         
         inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index)
-
+        
         ret = theano_fn(inp, q, ans, ans_mask, ans_inp)
         param_norm = np.max([utils.get_norm(x.get_value()) for x in self.params])
         
