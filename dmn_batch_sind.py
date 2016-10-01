@@ -52,9 +52,12 @@ class DMN_batch:
         self.vocab, self.ivocab = self._load_vocab(self.data_dir)
 
         self.train_story = None
+        self.test_story = None
         self.train_dict_story, self.train_features, self.train_fns_dict, self.train_num_imgs = self._process_input_sind(self.data_dir, 'train')
         self.test_dict_story, self.test_features, self.test_fns_dict, self.test_num_imgs = self._process_input_sind(self.data_dir, 'val')
 
+        self.train_story = self.train_dict_story.keys()
+        self.test_story = self.test_dict_story.keys()
         self.vocab_size = len(self.vocab)
         
         self.input_var = T.tensor3('input_var') # (batch_size, seq_len, cnn_dim)
@@ -109,12 +112,11 @@ class DMN_batch:
 
         print "==> building episodic memory module (fixed number of steps: %d)" % self.memory_hops
         memory = [self.q_q.copy()]
-        #memory = printing.Print('Hello World')(memory)
         for iter in range(1, self.memory_hops + 1):
-            m = printing.Print('mem')(memory[iter-1])
-            #current_episode = self.new_episode(memory[iter - 1])
-            current_episode = self.new_episode(m)
-            current_episode = printing.Print('current_episode')(current_episode)
+            #m = printing.Print('mem')(memory[iter-1])
+            current_episode = self.new_episode(memory[iter - 1])
+            #current_episode = self.new_episode(m)
+            #current_episode = printing.Print('current_episode')(current_episode)
             memory.append(self.GRU_update(memory[iter - 1], current_episode,
                                           self.W_mem_res_in, self.W_mem_res_hid, self.b_mem_res, 
                                           self.W_mem_upd_in, self.W_mem_upd_hid, self.b_mem_upd,
@@ -388,7 +390,7 @@ class DMN_batch:
                     img_id = s_slid[1][0]
                     inp.append(features[fns_dict[img_id]])
             inp = np.stack(inp, axis = 0)
-            print inp.shape
+            #print inp.shape
             inputs.append(inp)
             answer = []
             answer.append(self.vocab_size)
@@ -413,14 +415,14 @@ class DMN_batch:
         questions = np.array(questions).astype(floatX)
         answers = np.array(answers).astype(np.int32)
         answers_mask = np.array(answers_mask).astype(floatX)
-        print answers_mask
+        #print answers_mask
         answers_inp = np.stack(answers_inp, axis = 0)
 
-        print 'inputs', inputs.shape
-        print 'questions', questions.shape
-        print 'answers',answers.shape
-        print 'answers_inp', answers_inp.shape
-        print 'answers_mask',answers_mask.shape
+        #print 'inputs', inputs.shape
+        #print 'questions', questions.shape
+        #print 'answers',answers.shape
+        #print 'answers_inp', answers_inp.shape
+        #print 'answers_mask',answers_mask.shape
         return inputs, questions, answers, answers_inp, answers_mask
    
     
@@ -475,7 +477,7 @@ class DMN_batch:
 
         split_dir = os.path.join(data_dir, split)
         fea_dir = os.path.join(split_dir, 'fea_vgg16_fc7')
-        anno_fn = os.path.join(split_dir,'annotions.txt')
+        anno_fn = os.path.join(split_dir,'annotions_filtered.txt')
         # Now load the stories.
         dict_story = {}
         with open(anno_fn ,'r') as fid:
@@ -632,7 +634,7 @@ class DMN_batch:
     
     def shuffle_train_set(self):
         if self.train_story:
-            self.train_story = random.shuffle(self.train_story)
+            random.shuffle(self.train_story)
         else:
             self.train_story = self.train_dict_story.keys()
 
