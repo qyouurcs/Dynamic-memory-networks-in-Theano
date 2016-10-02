@@ -88,7 +88,8 @@ class DMN_batch:
         # Now, share the parameter with the input module.
         q_var_shuffled = self.q_var.dimshuffle(1,0)
         q_hist = T.dot(self.W_inp_emb_in, q_var_shuffled) + self.b_inp_emb_in.dimshuffle(0,'x')
-        self.q_q = q_hist.dimshuffle(0,1)
+
+        self.q_q = q_hist.dimshuffle(0,1) # batch x dim
         
         print "==> creating parameters for memory module"
         self.W_mem_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
@@ -144,16 +145,16 @@ class DMN_batch:
 
         self.W_a = nn_utils.normal_param(std=0.1, shape=(self.vocab_size + 1, self.dim))
         
-        self.W_ans_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size +1))
-        self.W_ans_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_ans_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim + self.vocab_size +1))
+        self.W_ans_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
         self.b_ans_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_ans_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size +1))
-        self.W_ans_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_ans_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim + self.vocab_size +1))
+        self.W_ans_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
         self.b_ans_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_ans_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.vocab_size +1))
-        self.W_ans_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_ans_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim + self.vocab_size +1))
+        self.W_ans_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
         self.b_ans_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         logging.info('answer_inp_var_shuffled size')
@@ -264,7 +265,8 @@ class DMN_batch:
                                      self.W_inp_hid_in, self.W_inp_hid_hid, self.b_inp_hid)
     
     def answer_gru_step(self, x, prev_h):
-        return self.GRU_update(prev_h, x, self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
+        return self.GRU_update(prev_h, T.concatenate([ x, self.q_q.T]), 
+                                     self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
                                      self.W_ans_upd_in, self.W_ans_upd_hid, self.b_ans_upd,
                                      self.W_ans_hid_in, self.W_ans_hid_hid, self.b_ans_hid)
     
