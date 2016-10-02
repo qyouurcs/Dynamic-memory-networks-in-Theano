@@ -492,11 +492,12 @@ class DMN_batch:
                     dict_story[sid] = {}
                 dict_story[sid][slid] = []
                 dict_story[sid][slid].append(flickr_id)
-                inp_v = [ utils.process_word2(word = w,
-                                        word2vec = self.word2vec,
-                                        vocab = self.vocab,
-                                        word_vector_size = self.word_vector_size,
-                                        to_return = 'word2vec') for w in parts[4:] ]
+                inp_v = []
+                #inp_v = [ utils.process_word2(word = w,
+                #                        word2vec = self.word2vec,
+                #                        vocab = self.vocab,
+                #                        word_vector_size = self.word_vector_size,
+                #                        to_return = 'word2vec') for w in parts[4:] ]
 
                 inp_y = [ utils.process_word2(word = w,
                                         word2vec = self.word2vec,
@@ -569,55 +570,6 @@ class DMN_batch:
                 vocab[parts[1]] = int(parts[0])
                 ivocab[int(parts[0])] = parts[1]
         return vocab, ivocab
-    
-    def _process_input(self, data_raw):
-        questions = []
-        inputs = []
-        answers = []
-        fact_counts = []
-        input_masks = []
-        
-        for x in data_raw:
-            inp = x["C"].lower().split(' ') 
-            inp = [w for w in inp if len(w) > 0]
-            q = x["Q"].lower().split(' ')
-            q = [w for w in q if len(w) > 0]
-            
-            inp_vector = [utils.process_word(word = w, 
-                                        word2vec = self.word2vec, 
-                                        vocab = self.vocab, 
-                                        ivocab = self.ivocab, 
-                                        word_vector_size = self.word_vector_size, 
-                                        to_return = "word2vec") for w in inp]
-    
-            q_vector = [utils.process_word(word = w, 
-                                        word2vec = self.word2vec, 
-                                        vocab = self.vocab, 
-                                        ivocab = self.ivocab, 
-                                        word_vector_size = self.word_vector_size, 
-                                        to_return = "word2vec") for w in q]
-            
-            if (self.input_mask_mode == 'word'):
-                input_mask = range(len(inp))
-            elif (self.input_mask_mode == 'sentence'):
-                input_mask = [index for index, w in enumerate(inp) if w == '.']
-            else:
-                raise Exception("unknown input_mask_mode")
-            fact_count = len(input_mask)
-    
-            inputs.append(inp_vector)
-            questions.append(q_vector)
-            # NOTE: here we assume the answer is one word! 
-            answers.append(utils.process_word(word = x["A"], 
-                                            word2vec = self.word2vec, 
-                                            vocab = self.vocab, 
-                                            ivocab = self.ivocab, 
-                                            word_vector_size = self.word_vector_size, 
-                                            to_return = "index"))
-            fact_counts.append(fact_count)
-            input_masks.append(input_mask)
-        
-        return inputs, questions, answers, fact_counts, input_masks 
     
     
     def get_batches_per_epoch(self, mode):

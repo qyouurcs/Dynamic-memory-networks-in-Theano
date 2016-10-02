@@ -126,10 +126,10 @@ def process_word(word, word2vec, vocab, ivocab, word_vector_size, to_return="wor
 
 
 def process_word2(word, word2vec, vocab, word_vector_size, to_return="word2vec", silent=False):
-    if not word in word2vec:
-        create_vector(word, word2vec, word_vector_size, silent)
     
     if to_return == "word2vec":
+        if not word in word2vec:
+            create_vector(word, word2vec, word_vector_size, silent)
         return word2vec[word]
     elif to_return == "index":
         if word not in vocab:

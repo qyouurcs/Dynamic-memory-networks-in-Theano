@@ -55,10 +55,11 @@ network_name = args.prefix + '%s.mh%d.n%d.bs%d%s%s%s' % (
     )
 
 
-word2vec = utils.load_glove(args.word_vector_size)
+#word2vec = utils.load_glove(args.word_vector_size)
 
 args_dict = dict(args._get_kwargs())
-args_dict['word2vec'] = word2vec
+#args_dict['word2vec'] = word2vec
+args_dict['word2vec'] = None
     
 
 # init class
