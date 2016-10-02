@@ -123,7 +123,7 @@ def do_epoch(mode, epoch, skipped=0):
     print metrics.confusion_matrix(y_true, y_pred)
     
     accuracy = sum([1 if t == p else 0 for t, p in zip(y_true, y_pred)])
-    print "accuracy: %.2f percent" % (accuracy * 100.0 / batches_per_epoch / args.batch_size)
+    print "accuracy: %.2f percent" % (accuracy * 100.0 / len(y_true) )
     
     return avg_loss, skipped
 
