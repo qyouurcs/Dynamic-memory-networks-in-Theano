@@ -88,7 +88,7 @@ class DMN_batch:
         # Now, share the parameter with the input module.
         q_var_shuffled = self.q_var.dimshuffle(1,0)
         q_hist = T.dot(self.W_inp_emb_in, q_var_shuffled) + self.b_inp_emb_in.dimshuffle(0,'x')
-        self.q_q = q_hist.dimshuffle(0,1)
+        self.q_q = q_hist.dimshuffle(0,1) # dim x batch
         
         print "==> creating parameters for memory module"
         self.W_mem_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
@@ -140,7 +140,7 @@ class DMN_batch:
 
         answer_inp_var_shuffled = self.answer_inp_var.dimshuffle(1,2,0)
         # Sounds good. Now, we need to map last_mem to a new space. 
-        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim))
+        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 2))
         self.W_inp_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.vocab_size + 1))
 
         def _dot2(x, W):
@@ -148,7 +148,13 @@ class DMN_batch:
 
         answer_inp_var_shuffled_emb,_ = theano.scan(fn = _dot2, sequences = answer_inp_var_shuffled,
                 non_sequences = self.W_inp_emb ) # seq x dim x batch
-        mem_ans = T.dot(self.W_mem_emb, last_mem) # dim x batchsize.
+        
+        # Now, we also need to embed the image and use it to do the memory. 
+        #q_q_shuffled = self.q_q.dimshuffle(1,0) # dim * batch.
+        init_ans = T.concatenate([self.q_q, last_mem], axis = 0)
+
+        mem_ans = T.dot(self.W_mem_emb, init_ans) # dim x batchsize.
+
         mem_ans_dim = mem_ans.dimshuffle('x',0,1)
 
         answer_inp = T.concatenate([mem_ans_dim, answer_inp_var_shuffled_emb], axis = 0)
