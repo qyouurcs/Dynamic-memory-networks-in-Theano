@@ -17,6 +17,7 @@ import utils
 import nn_utils
 
 import os
+import sys
 
 import copy
 import h5py
@@ -31,7 +32,7 @@ climate.enable_default_logging()
 
 class DMN_batch:
     
-    def __init__(self, data_dir, word2vec, word_vector_size, dim, cnn_dim, cnn_dim_fc, story_len,
+    def __init__(self, data_dir, word2vec, word_vector_size, truncate_gradient, dim, cnn_dim, cnn_dim_fc, story_len,
                 patches, mode, answer_module, memory_hops, batch_size, l2,
                 normalize_attention, batch_norm, dropout, **kwargs):
         
@@ -39,6 +40,7 @@ class DMN_batch:
 
         self.data_dir = data_dir
         
+        self.truncate_gradient = truncate_gradient
         self.word2vec = word2vec
         self.word_vector_size = word_vector_size
         self.dim = dim
@@ -120,27 +122,26 @@ class DMN_batch:
         # Now, we use the GRU to build the inputs.
         # Two-level of nested scan is unnecessary. It will become too complicated. Just use this one.
         inp_dummy = theano.shared(np.zeros((self.inp_dim, self.story_len), dtype = floatX))
-        truncate_gradient = 20
         for i in range(self.batch_size):
             if i == 0:
                 inp_1st_f, _ = theano.scan(fn = self.input_gru_step_forward,
                                     sequences = inp_emb[i,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy),truncate_gradient = truncate_gradient )
+                                    outputs_info=T.zeros_like(inp_dummy),truncate_gradient = self.truncate_gradient )
 
                 inp_1st_b, _ = theano.scan(fn = self.input_gru_step_backward,
                                     sequences = inp_emb[i,:,::-1,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy),truncate_gradient = truncate_gradient )
+                                    outputs_info=T.zeros_like(inp_dummy),truncate_gradient = self.truncate_gradient )
                 # Now, combine them.
                 inp_1st = T.concatenate([inp_1st_f.dimshuffle(2,0,1), inp_1st_b.dimshuffle(2,0,1)], axis = -1)
                 self.inp_c = inp_1st.dimshuffle('x', 0, 1, 2)
             else:
                 inp_f, _ = theano.scan(fn = self.input_gru_step_forward,
                                     sequences = inp_emb[i,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy), truncate_gradient = truncate_gradient )
+                                    outputs_info=T.zeros_like(inp_dummy), truncate_gradient = self.truncate_gradient )
 
                 inp_b, _ = theano.scan(fn = self.input_gru_step_backward,
                                     sequences = inp_emb[i,:,::-1,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy), truncate_gradient = truncate_gradient )
+                                    outputs_info=T.zeros_like(inp_dummy), truncate_gradient = self.truncate_gradient )
                 # Now, combine them.
                 inp_fb = T.concatenate([inp_f.dimshuffle(2,0,1), inp_b.dimshuffle(2,0,1)], axis = -1)
                 self.inp_c = T.concatenate([self.inp_c, inp_fb.dimshuffle('x', 0, 1, 2)], axis = 0)
@@ -327,7 +328,8 @@ class DMN_batch:
         
         self.loss = self.loss_ce + self.loss_l2
             
-        updates = lasagne.updates.adadelta(self.loss, self.params)
+        #updates = lasagne.updates.adadelta(self.loss, self.params)
+        updates = lasagne.updates.adam(self.loss, self.params)
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
@@ -335,6 +337,7 @@ class DMN_batch:
             self.train_fn = theano.function(inputs=[self.input_var, self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var], 
                                             outputs=[self.prediction, self.loss],
                                             updates=updates)
+                                            #profile = True)
         
         print "==> compiling test_fn"
         self.test_fn = theano.function(inputs=[self.input_var, self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var],
@@ -416,7 +419,8 @@ class DMN_batch:
             sequences=self.inp_batch_dimshuffled, #980 x 512 x 50
             non_sequences=[mem, self.q_q],
             #outputs_info=T.zeros_like(epi_dummy))
-            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0][0])) 
+            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0][0]),
+            truncate_gradient = self.truncate_gradient )
         
         if (self.normalize_attention):
             g = nn_utils.softmax(g)
@@ -425,7 +429,8 @@ class DMN_batch:
         e, e_updates = theano.scan(fn=self.new_episode_step,
             sequences=[self.inp_batch_dimshuffled, g],
             #outputs_info=T.zeros_like(epi_dummy2))
-            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0]))
+            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0]),
+            truncate_gradient = self.truncate_gradient )
         
         e_list = []
         for index in range(self.batch_size * self.story_len):
@@ -457,7 +462,7 @@ class DMN_batch:
     def _process_batch_sind(self, batch_index, split = 'train'):
         # Now, randomly select one story.
 
-        logging.info('before batch ...')
+        #logging.info('before batch ...')
 
         start_index = self.batch_size * batch_index
 
@@ -595,7 +600,7 @@ class DMN_batch:
         #print answers_mask.shape
 
 
-        logging.info('after batch ...')
+        #logging.info('after batch ...')
         return inputs, questions, answers, answers_inp, answers_mask
    
     
@@ -751,6 +756,8 @@ class DMN_batch:
         inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index)
         
         ret = theano_fn(inp, q, ans, ans_mask, ans_inp)
+        #theano_fn.profile.print_summary()
+        #sys.exit()
         param_norm = np.max([utils.get_norm(x.get_value()) for x in self.params])
         
         return {"prediction": ret[0],

@@ -27,13 +27,15 @@ parser.add_argument('--patches', type=int, default=196, help='number of hidden u
 parser.add_argument('--story_len', type=int, default=5, help='number of images in a story')
 parser.add_argument('--glove_vocab_fn', type=str, default="./data/sind/vocab_fixed_glove.txt", help='dictionary of the glove vocabularies.')
 
+parser.add_argument('--truncate_gradient', type=int, default=5, help='truncate_gradient')
+
 parser.add_argument('--epochs', type=int, default=500, help='number of epochs')
 parser.add_argument('--load_state', type=str, default="", help='state file path')
 parser.add_argument('--answer_module', type=str, default="recurrent", help='answer module type: feedforward or recurrent')
 parser.add_argument('--mode', type=str, default="train", help='mode: train or test. Test mode required load_state')
 parser.add_argument('--input_mask_mode', type=str, default="sentence", help='input_mask_mode: word or sentence')
-parser.add_argument('--memory_hops', type=int, default=5, help='memory GRU steps')
-parser.add_argument('--batch_size', type=int, default=5, help='no commment')
+parser.add_argument('--memory_hops', type=int, default=3, help='memory GRU steps')
+parser.add_argument('--batch_size', type=int, default=20, help='no commment')
 parser.add_argument('--data_dir', type=str, default="data/sind", help='data root directory')
 parser.add_argument('--l2', type=float, default=0, help='L2 regularization')
 parser.add_argument('--normalize_attention', type=bool, default=False, help='flag for enabling softmax on attention vector')
@@ -91,7 +93,7 @@ def do_epoch(mode, epoch, skipped=0):
     batches_per_epoch = dmn.get_batches_per_epoch(mode)
     
     for i in range(0, batches_per_epoch):
-        logging.info('main before each mini-batch')
+        #logging.info('main before each mini-batch')
         step_data = dmn.step(i, mode)
         prediction = step_data["prediction"]
         answers = step_data["answers"]
@@ -116,15 +118,16 @@ def do_epoch(mode, epoch, skipped=0):
             # TODO: save the state sometimes
             if (i % args.log_every == 0):
                 cur_time = time.time()
-                print ("  %sing: %d %d / %d \t loss: %.3f \t avg_loss: %.3f \t skipped: %d \t %s \t time: %.2fs" % 
-                    (mode, epoch, i * args.batch_size, batches_per_epoch * args.batch_size, 
-                     current_loss, avg_loss / (i + 1), skipped, log, cur_time - prev_time))
+                logging.info("  %sing: %d %d / %d \t loss: %.3f \t avg_loss: %.3f \t skipped: %d \t %s \t time: %.2fs",
+                    mode, epoch, i * args.batch_size, batches_per_epoch * args.batch_size, 
+                     current_loss, avg_loss / (i + 1), skipped, log, cur_time - prev_time)
                 prev_time = cur_time
         
+
         if np.isnan(current_loss):
             print "==> current loss IS NaN. This should never happen :) " 
             exit()
-        logging.info('main after each mini-batch')
+        #logging.info('main after each mini-batch')
 
     avg_loss /= batches_per_epoch
     print "\n  %s loss = %.5f" % (mode, avg_loss)
