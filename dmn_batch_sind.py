@@ -146,15 +146,15 @@ class DMN_batch:
         self.W_a = nn_utils.normal_param(std=0.1, shape=(self.vocab_size + 1, self.dim))
         
         self.W_ans_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim + self.vocab_size +1))
-        self.W_ans_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
+        self.W_ans_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
         self.W_ans_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim + self.vocab_size +1))
-        self.W_ans_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
+        self.W_ans_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
         self.W_ans_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim + self.vocab_size +1))
-        self.W_ans_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
+        self.W_ans_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         logging.info('answer_inp_var_shuffled size')
@@ -164,7 +164,7 @@ class DMN_batch:
         #last_mem = printing.Print('prob_sm')(last_mem)
         results, _ = theano.scan(fn = self.answer_gru_step,
                 sequences = answer_inp_var_shuffled,
-                outputs_info = [ last_mem ])
+                outputs_info = [ last_mem])
         # Assume there is a start token 
         print results.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32'),
             self.q_var: np.random.rand(10, 4096).astype('float32'), 
@@ -265,7 +265,7 @@ class DMN_batch:
                                      self.W_inp_hid_in, self.W_inp_hid_hid, self.b_inp_hid)
     
     def answer_gru_step(self, x, prev_h):
-        return self.GRU_update(prev_h, T.concatenate([ x, self.q_q.T]), 
+        return self.GRU_update(prev_h, T.concatenate([ x, self.q_q], axis = 0), 
                                      self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
                                      self.W_ans_upd_in, self.W_ans_upd_hid, self.b_ans_upd,
                                      self.W_ans_hid_in, self.W_ans_hid_hid, self.b_ans_hid)
@@ -612,4 +612,25 @@ class DMN_batch:
                 "skipped": 0,
                 "log": "pn: %.3f" % param_norm,
                 }
+
+    def step_beam(self, batch_index, mode, beam_size):
+        if mode == "train" and self.mode == "test":
+            raise Exception("Cannot train during test mode")
         
+        if mode == "train":
+            theano_fn = self.train_fn 
+        if mode == "test":    
+            theano_fn = self.test_fn 
+        
+        inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index)
+        
+        ret = theano_fn(inp, q, ans, ans_mask, ans_inp)
+        param_norm = np.max([utils.get_norm(x.get_value()) for x in self.params])
+        
+        return {"prediction": ret[0],
+                "answers": ans,
+                "current_loss": ret[1],
+                "skipped": 0,
+                "log": "pn: %.3f" % param_norm,
+                }
+       
