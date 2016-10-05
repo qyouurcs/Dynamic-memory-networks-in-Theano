@@ -99,6 +99,17 @@ def load_glove(dim):
     logging.info('Finished loading glove.') 
     return word2vec
 
+def load_glove_vocab(glove_vocab_fn):
+    dict_glove = {}
+    with open(glove_vocab_fn,'r') as fid:
+        for aline in fid:
+            parts = aline.strip().split()
+            dict_glove[parts[0]] = map(float, parts[1:])
+
+    logging.info("Loading glove from %s", glove_vocab_fn)
+    
+    return dict_glove
+
 
 def create_vector(word, word2vec, word_vector_size, silent=False):
     # if the word is missing from Glove, create some fake vector and store in glove!
