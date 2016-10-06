@@ -25,6 +25,7 @@ parser.add_argument('--cnn_dim', type=int, default=512, help='number of hidden u
 parser.add_argument('--cnn_dim_fc', type=int, default=4096, help='number of hidden units in input module GRU')
 parser.add_argument('--patches', type=int, default=196, help='number of hidden units in input module GRU')
 parser.add_argument('--story_len', type=int, default=5, help='number of images in a story')
+parser.add_argument('--learning_rate', type=float, default=0.05, help='Initial learning rate')
 parser.add_argument('--glove_vocab_fn', type=str, default="./data/sind/vocab_fixed_glove.txt", help='dictionary of the glove vocabularies.')
 
 parser.add_argument('--truncate_gradient', type=int, default=5, help='truncate_gradient')
@@ -35,7 +36,7 @@ parser.add_argument('--answer_module', type=str, default="recurrent", help='answ
 parser.add_argument('--mode', type=str, default="train", help='mode: train or test. Test mode required load_state')
 parser.add_argument('--input_mask_mode', type=str, default="sentence", help='input_mask_mode: word or sentence')
 parser.add_argument('--memory_hops', type=int, default=3, help='memory GRU steps')
-parser.add_argument('--batch_size', type=int, default=20, help='no commment')
+parser.add_argument('--batch_size', type=int, default=30, help='no commment')
 parser.add_argument('--data_dir', type=str, default="data/sind", help='data root directory')
 parser.add_argument('--l2', type=float, default=0, help='L2 regularization')
 parser.add_argument('--normalize_attention', type=bool, default=False, help='flag for enabling softmax on attention vector')

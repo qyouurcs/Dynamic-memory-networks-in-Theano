@@ -32,13 +32,14 @@ climate.enable_default_logging()
 
 class DMN_batch:
     
-    def __init__(self, data_dir, word2vec, word_vector_size, truncate_gradient, dim, cnn_dim, cnn_dim_fc, story_len,
+    def __init__(self, data_dir, word2vec, word_vector_size, truncate_gradient, learning_rate, dim, cnn_dim, cnn_dim_fc, story_len,
                 patches, mode, answer_module, memory_hops, batch_size, l2,
                 normalize_attention, batch_norm, dropout, **kwargs):
         
         print "==> not used params in DMN class:", kwargs.keys()
 
         self.data_dir = data_dir
+        self.learning_rate = learning_rate
         
         self.truncate_gradient = truncate_gradient
         self.word2vec = word2vec
@@ -329,7 +330,7 @@ class DMN_batch:
         self.loss = self.loss_ce + self.loss_l2
             
         #updates = lasagne.updates.adadelta(self.loss, self.params)
-        updates = lasagne.updates.adam(self.loss, self.params)
+        updates = lasagne.updates.adam(self.loss, self.params, learning_rate = self.learning_rate)
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
