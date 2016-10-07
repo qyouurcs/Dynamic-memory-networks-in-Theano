@@ -28,6 +28,9 @@ parser.add_argument('--story_len', type=int, default=5, help='number of images i
 parser.add_argument('--epochs', type=int, default=500, help='number of epochs')
 parser.add_argument('--load_state', type=str, default="", help='state file path')
 parser.add_argument('--answer_module', type=str, default="recurrent", help='answer module type: feedforward or recurrent')
+parser.add_argument('--truncate_gradient', type=int, default=5, help='truncate_gradient')
+parser.add_argument('--learning_rate', type=float, default=0.01, help='Initial learning rate')
+
 parser.add_argument('--mode', type=str, default="train", help='mode: train or test. Test mode required load_state')
 parser.add_argument('--input_mask_mode', type=str, default="sentence", help='input_mask_mode: word or sentence')
 parser.add_argument('--memory_hops', type=int, default=5, help='memory GRU steps')

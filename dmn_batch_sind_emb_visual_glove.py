@@ -64,7 +64,7 @@ class DMN_batch:
         self.train_story = None
         self.test_story = None
         self.train_dict_story, self.train_lmdb_env_fc, self.train_lmdb_env_conv = self._process_input_sind(self.data_dir, 'train')
-        self.test_dict_story, self.test_lmdb_env_fn, self.test_lmdb_env_conv = self._process_input_sind(self.data_dir, 'val')
+        self.test_dict_story, self.test_lmdb_env_fc, self.test_lmdb_env_conv = self._process_input_sind(self.data_dir, 'val')
 
         self.train_story = self.train_dict_story.keys()
         self.test_story = self.test_dict_story.keys()
@@ -330,7 +330,8 @@ class DMN_batch:
         self.loss = self.loss_ce + self.loss_l2
             
         #updates = lasagne.updates.adadelta(self.loss, self.params)
-        updates = lasagne.updates.adam(self.loss, self.params, learning_rate = self.learning_rate)
+        #updates = lasagne.updates.adam(self.loss, self.params, learning_rate = self.learning_rate)
+        updates = lasagne.updates.rmsprop(self.loss, self.params, learning_rate = self.learning_rate)
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
@@ -754,7 +755,7 @@ class DMN_batch:
         if mode == "test":    
             theano_fn = self.test_fn 
         
-        inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index)
+        inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index, mode)
         
         ret = theano_fn(inp, q, ans, ans_mask, ans_inp)
         #theano_fn.profile.print_summary()

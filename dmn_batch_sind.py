@@ -601,7 +601,7 @@ class DMN_batch:
         if mode == "test":    
             theano_fn = self.test_fn 
         
-        inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index)
+        inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index, mode)
         
         ret = theano_fn(inp, q, ans, ans_mask, ans_inp)
         param_norm = np.max([utils.get_norm(x.get_value()) for x in self.params])

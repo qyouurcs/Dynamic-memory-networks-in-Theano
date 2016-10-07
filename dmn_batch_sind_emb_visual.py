@@ -31,14 +31,16 @@ climate.enable_default_logging()
 
 class DMN_batch:
     
-    def __init__(self, data_dir, word2vec, word_vector_size, dim, cnn_dim, cnn_dim_fc, story_len,
+    def __init__(self, data_dir, word2vec, word_vector_size, truncate_gradient, learning_rate, dim, cnn_dim, cnn_dim_fc, story_len,
                 patches, mode, answer_module, memory_hops, batch_size, l2,
                 normalize_attention, batch_norm, dropout, **kwargs):
         
         print "==> not used params in DMN class:", kwargs.keys()
 
         self.data_dir = data_dir
+        self.learning_rate = learning_rate
         
+        self.truncate_gradient = truncate_gradient
         self.word2vec = word2vec
         self.word_vector_size = word_vector_size
         self.dim = dim
@@ -325,7 +327,7 @@ class DMN_batch:
         
         self.loss = self.loss_ce + self.loss_l2
             
-        updates = lasagne.updates.adadelta(self.loss, self.params)
+        updates = lasagne.updates.adadelta(self.loss, self.params, learning_rate = self.learning_rate)
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
@@ -414,7 +416,8 @@ class DMN_batch:
             sequences=self.inp_batch_dimshuffled, #980 x 512 x 50
             non_sequences=[mem, self.q_q],
             #outputs_info=T.zeros_like(epi_dummy))
-            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0][0])) 
+            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0][0]),
+            truncate_gradient = self.truncate_gradient )
         
         if (self.normalize_attention):
             g = nn_utils.softmax(g)
@@ -423,7 +426,8 @@ class DMN_batch:
         e, e_updates = theano.scan(fn=self.new_episode_step,
             sequences=[self.inp_batch_dimshuffled, g],
             #outputs_info=T.zeros_like(epi_dummy2))
-            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0]))
+            outputs_info=T.zeros_like(self.inp_batch_dimshuffled[0]),
+            truncate_gradient = self.truncate_gradient )
         
         e_list = []
         for index in range(self.batch_size * self.story_len):
@@ -722,7 +726,7 @@ class DMN_batch:
         if mode == "test":    
             theano_fn = self.test_fn 
         
-        inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index)
+        inp, q, ans, ans_inp, ans_mask = self._process_batch_sind(batch_index, mode)
         
         ret = theano_fn(inp, q, ans, ans_mask, ans_inp)
         param_norm = np.max([utils.get_norm(x.get_value()) for x in self.params])
