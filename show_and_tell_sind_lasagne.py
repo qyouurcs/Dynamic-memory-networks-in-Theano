@@ -116,13 +116,20 @@ class DMN_batch:
             cost = T.nnet.categorical_crossentropy(preds, targets)[T.flatten(mask).nonzero()]
             return cost
         
-        loss = T.mean(calc_cross_ent(output, self.answer_mask, self.answer_var))
-        
+        self.loss_ce = T.mean(calc_cross_ent(output, self.answer_mask, self.answer_var))
+ 
         MAX_GRAD_NORM = 1e5
         
         self.params = lasagne.layers.get_all_params(l_out, trainable=True)
+
+        if self.l2 > 0:
+            self.loss_l2 = self.l2 * nn_utils.l2_reg(self.params)
+        else:
+            self.loss_l2 = 0
         
-        all_grads = T.grad(loss, self.params)
+        self.loss = self.loss_ce + self.loss_l2
+       
+        all_grads = T.grad(self.loss, self.params)
         all_grads = [T.clip(g, -5, 5) for g in all_grads]
         all_grads, norm = lasagne.updates.total_norm_constraint(
             all_grads, MAX_GRAD_NORM, return_norm=True)
@@ -130,11 +137,11 @@ class DMN_batch:
         updates = lasagne.updates.adam(all_grads, self.params, learning_rate=0.001)
         
         self.train_fn = theano.function([self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var],
-                                  [loss, output, norm],
+                                  [self.loss, output, norm],
                                   updates=updates
                                  )
         
-        self.test_fn = theano.function([self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var], [loss, output, norm])
+        self.test_fn = theano.function([self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var], [self.loss, output, norm])
 
         self.pred_fn = theano.function([self.q_var, self.answer_inp_var], [output])
     def _empty_word_vector(self):
@@ -367,6 +374,11 @@ class DMN_batch:
         # Now, add UNK
         vocab['UNK'] = len(vocab)
         ivocab[len(ivocab)] = 'UNK'
+        vocab['[male]'] = len(vocab)
+        ivocab[len(ivocab)] = '[male]'
+        vocab['[female]'] = len(vocab)
+        ivocab[len(ivocab)] = '[female]'
+
 
         logging.info('len(vocab) / len(ivocab) = %d/%d', len(vocab), len(ivocab))
         return vocab, ivocab
@@ -459,21 +471,21 @@ class DMN_batch:
             if cnt_ins == 0:
                 break
             
-            x_i = np.zeros((cnt_ins, max_b, self.vocab_size + 1), dtype = 'float32')
+            x_i = np.zeros((cnt_ins, self.SEQUENCE_LENGTH-1), dtype = 'int32')
             q_i = np.zeros((cnt_ins, self.cnn_dim), dtype='float32')
 
             idx_base = 0
             for j,idx_prev_j in enumerate(idx_prevs):
                 for m, idx_prev in enumerate(idx_prev_j):
                     for k in range(len(idx_prev)):
-                        x_i[m + idx_base,k,idx_prev[k]] = 1.0
+                        x_i[m + idx_base,k] = idx_prev[k]
                 q_i[idx_base:idx_base + len(idx_prev_j),:] = q[j,:]
 
                 idx_base += len(idx_prev_j)
             # This is really pain full.
             # Since the batch_size is fixed when creating the module. Thus,
             # we need to make them equal to the batch_size.
-            pred = np.zeros_like(x_i)
+            pred = np.zeros((cnt_ins, x_i.shape[1]), dtype = 'float32')
             for i in range(0, x_i.shape[0], batch_size):
                 start_idx = i
                 end_idx = i + batch_size
@@ -481,8 +493,8 @@ class DMN_batch:
                     end_idx = x_i.shape[0]
                     start_idx = end_idx - batch_size
                 
-                t = theano_fn(q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:,:])
-                pred[start_idx:end_idx,:,:] = t[0]
+                t = theano_fn(q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:])
+                pred[start_idx:end_idx,:] = t[0]
 
             p = np.zeros((pred.shape[0], pred.shape[2]))
             for i in range(pred.shape[0]):

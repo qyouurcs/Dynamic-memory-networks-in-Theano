@@ -290,7 +290,7 @@ class DMN_batch:
 
         n = prob_shuffled.shape[0] * prob_shuffled.shape[1]
         prob_rhp = T.reshape(prob_shuffled, (n, prob_shuffled.shape[2]))
-        prob_sm = nn_utils.softmax(prob_rhp)
+        prob_sm = nn_utils.softmax_(prob_rhp)
         self.prediction = prob_sm
 
         mask =  T.reshape(self.answer_mask, (n,))

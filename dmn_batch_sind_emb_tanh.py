@@ -236,8 +236,8 @@ class DMN_batch:
         prob_rhp = T.reshape(prob_shuffled, (n, prob_shuffled.shape[2]))
         preds_rhp = T.reshape(preds_shuffled, (n_preds, preds_shuffled.shape[2]))
 
-        prob_sm = nn_utils.softmax(prob_rhp)
-        preds_sm = nn_utils.softmax(preds_rhp)
+        prob_sm = nn_utils.softmax_(prob_rhp)
+        preds_sm = nn_utils.softmax_(preds_rhp)
         self.prediction = prob_sm # this one is for the training.
 
         # This one is for the beamsearch.

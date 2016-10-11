@@ -149,8 +149,8 @@ class DMN_batch:
         prob_rhp = T.reshape(prob_shuffled, (n, prob_shuffled.shape[2]))
         preds_rhp = T.reshape(preds_shuffled, (n_preds, preds_shuffled.shape[2]))
 
-        prob_sm = nn_utils.softmax(prob_rhp)
-        preds_sm = nn_utils.softmax(preds_rhp)
+        prob_sm = nn_utils.softmax_(prob_rhp)
+        preds_sm = nn_utils.softmax_(preds_rhp)
         self.prediction = prob_sm # this one is for the training.
 
         # This one is for the beamsearch.
@@ -318,7 +318,6 @@ class DMN_batch:
         start_index = start_index % len(split_story)
         # make sure there is enough for a batch.
         start_index = min(start_index, len(split_story) - self.batch_size)
-        pdb.set_trace()
         # Now, we select the stories.
         stories = split_story[start_index:start_index+self.batch_size]
         # For each story, we randomly select one as the question and the remaining as the facts.
@@ -345,7 +344,6 @@ class DMN_batch:
 
         for slid, sid in zip(slids,stories):
             anno = split_dict_story[sid]
-            pdb.set_trace()
             input_anno = anno[slid]
             img_id = input_anno[1][0]
             img_ids.append(img_id)
@@ -534,6 +532,10 @@ class DMN_batch:
         # Now, add UNK
         vocab['UNK'] = len(vocab)
         ivocab[len(ivocab)] = 'UNK'
+        vocab['[male]'] = len(vocab)
+        ivocab[len(ivocab)] = '[male]'
+        vocab['[female]'] = len(vocab)
+        ivocab[len(ivocab)] = '[female]'
 
         logging.info('len(vocab) / len(ivocab) = %d/%d', len(vocab), len(ivocab))
         return vocab, ivocab

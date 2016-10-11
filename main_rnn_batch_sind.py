@@ -31,7 +31,7 @@ parser.add_argument('--truncate_gradient', type=int, default=5, help='truncate_g
 parser.add_argument('--learning_rate', type=float, default=0.01, help='Initial learning rate')
 
 parser.add_argument('--mode', type=str, default="train", help='mode: train or test. Test mode required load_state')
-parser.add_argument('--batch_size', type=int, default=20, help='no commment')
+parser.add_argument('--batch_size', type=int, default=80, help='no commment')
 parser.add_argument('--data_dir', type=str, default="data/sind", help='data root directory')
 parser.add_argument('--save_dir', type=str, default="states_rnn_show", help='data root directory')
 parser.add_argument('--l2', type=float, default=0, help='L2 regularization')
@@ -77,6 +77,35 @@ if args.load_state != "":
 if not os.path.isdir(args.save_dir):
     os.makedirs(args.save_dir)
 
+def do_epoch_beam(epoch, skipped=0):
+    # mode is 'train' or 'test'
+    batches_per_epoch = dmn.get_batches_per_epoch('test')
+    
+    all_candidates = [] 
+    result_list = []
+    json_fn = 't.json'
+    #for i in range(0, batches_per_epoch):
+    for i in range(0, 2):
+        step_data = dmn.step_beam(i)
+    
+        for caption,img_id in zip(step_data['captions'], step_data['img_ids']):
+            top_prediction = caption[0]
+            # ix 0 is the END token, skip that
+            candidate = ' '.join([ dmn.ivocab[ix] for ix in top_prediction[1] if ix != dmn.vocab['.'] and ix < len(dmn.vocab) ])
+            pdb.set_trace()
+            logging.info('loss: %f', caption[1])
+            logging.info('candidate: %s', candidate)
+            all_candidates.append(candidate)
+            cur_img = {}
+            cur_img['image_id'] = img_id
+            cur_img['caption'] = candidate
+            result_list.append(cur_img)
+            # We need to calculate the BLEU score, thus we need to format the datas
+            # the way did in neural talk, which has the perl codes for this.
+
+    pdb.set_trace()
+    with open(json_fn, 'w') as json_fid:
+        json.dump(result_list, json_fid)
 
 
 def do_epoch(mode, epoch, skipped=0):
@@ -163,6 +192,16 @@ elif args.mode == 'test':
     data["vocab"] = dmn.vocab.keys()
     json.dump(data, file, indent=2)
     do_epoch('test', 0)
+elif args.mode == 'test_beam':
+    file = open('last_tested_model.json', 'w+')
+    data = dict(args._get_kwargs())
+    data["id"] = network_name
+    data["name"] = network_name
+    data["description"] = ""
+    data["vocab"] = dmn.vocab.keys()
+    json.dump(data, file, indent=2)
+    do_epoch_beam('test', 0)
+
 
 else:
     raise Exception("unknown mode")
