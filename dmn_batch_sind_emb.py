@@ -27,6 +27,10 @@ import climate
 logging = climate.get_logger(__name__)
 climate.enable_default_logging()
 
+import sys
+reload(sys)  
+sys.setdefaultencoding('utf8')
+
 class DMN_batch:
     
     def __init__(self, data_dir, word2vec, word_vector_size, dim,
@@ -88,8 +92,18 @@ class DMN_batch:
         # Now, share the parameter with the input module.
         q_var_shuffled = self.q_var.dimshuffle(1,0)
         q_hist = T.dot(self.W_inp_emb_in, q_var_shuffled) + self.b_inp_emb_in.dimshuffle(0,'x')
-        self.q_q = q_hist.dimshuffle(0,1) # dim x batch
-        
+        q_hist_shuffled = q_hist.dimshuffle(1,0)
+
+        if self.batch_norm:
+            logging.info("Using batch normalization.")
+        q_net = layers.InputLayer(shape=(self.batch_size, self.dim), input_var=q_hist_shuffled)
+        if self.batch_norm:
+            q_net = layers.BatchNormLayer(incoming=q_net)
+        if self.dropout > 0 and self.mode == 'train':
+            q_net = layers.DropoutLayer(q_net, p=self.dropout)
+        #last_mem = layers.get_output(q_net).dimshuffle((1, 0))
+        self.q_q = layers.get_output(q_net).dimshuffle(1,0)
+
         print "==> creating parameters for memory module"
         self.W_mem_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.W_mem_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
@@ -149,9 +163,13 @@ class DMN_batch:
         answer_inp_var_shuffled_emb,_ = theano.scan(fn = _dot2, sequences = answer_inp_var_shuffled,
                 non_sequences = self.W_inp_emb ) # seq x dim x batch
         
+        #self.q_q = printing.Print('q_q')(self.q_q)
+        #last_mem = printing.Print('last_mem')(last_mem)
         # Now, we also need to embed the image and use it to do the memory. 
         #q_q_shuffled = self.q_q.dimshuffle(1,0) # dim * batch.
         init_ans = T.concatenate([self.q_q, last_mem], axis = 0)
+
+
 
         mem_ans = T.dot(self.W_mem_emb, init_ans) # dim x batchsize.
 
@@ -267,7 +285,6 @@ class DMN_batch:
         self.test_fn = theano.function(inputs=[self.input_var, self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var],
                                        outputs=[self.prediction, self.loss])
         
-    
         print "==> compiling pred_fn"
         self.pred_fn= theano.function(inputs=[self.input_var, self.q_var, self.answer_inp_var],
                                        outputs=[self.pred])
@@ -418,7 +435,6 @@ class DMN_batch:
         img_ids = []
 
         for slid, sid in zip(slids,stories):
-            #pdb.set_trace()
             anno = split_dict_story[sid]
             input_anno = anno[slid]
             img_id = input_anno[1][0]
@@ -461,6 +477,13 @@ class DMN_batch:
         answers_mask = np.array(answers_mask).astype(floatX)
         #print answers_mask
         answers_inp = np.stack(answers_inp, axis = 0)
+        #for i in range(answers.shape[0]):
+        #    for j in range(answers.shape[1]):
+        #        if answers[i][j] in self.ivocab:
+        #            print self.ivocab[answers[i][j]].encode('utf8'),
+        #    print
+        #pdb.set_trace()
+
 
         #print 'inputs', inputs.shape
         #print 'questions', questions.shape
@@ -521,7 +544,7 @@ class DMN_batch:
 
         split_dir = os.path.join(data_dir, split)
         fea_dir = os.path.join(split_dir, 'fea_vgg16_fc7')
-        anno_fn = os.path.join(split_dir,'annotions_filtered.txt')
+        anno_fn = os.path.join(split_dir,'annotions_filtered_fixed.txt')
         # Now load the stories.
         dict_story = {}
         with open(anno_fn ,'r') as fid:
@@ -551,7 +574,8 @@ class DMN_batch:
                 dict_story[sid][slid].append( inp_v )
                 dict_story[sid][slid].append( inp_y )
         # Just in case, we sort all the stories in line.
-        for sid in dict_story:
+        t_keys = dict_story.keys()
+        for sid in t_keys:
             story = dict_story[sid].items()
             sorted(story, key = lambda x: x[0])
             dict_story[sid] = story
@@ -603,14 +627,23 @@ class DMN_batch:
 
         return dict_story, features, fns_dict, num_imgs
     def _load_vocab(self, data_dir):
-        v_fn = os.path.join(data_dir, 'vocab.txt')
+        v_fn = os.path.join(data_dir, 'vocab_fixed_glove.txt')
         vocab = {}
         ivocab = {}
         with open(v_fn, 'r') as fid:
             for aline in fid:
                 parts = aline.strip().split()
-                vocab[parts[1]] = int(parts[0])
-                ivocab[int(parts[0])] = parts[1]
+                vocab[parts[0]] = len(vocab)
+                ivocab[len(ivocab)] = parts[0]
+        # Now, add UNK
+        vocab['UNK'] = len(vocab)
+        ivocab[len(ivocab)] = 'UNK'
+        vocab['[male]'] = len(vocab)
+        ivocab[len(ivocab)] = '[male]'
+        vocab['[female]'] = len(vocab)
+        ivocab[len(ivocab)] = '[female]'
+
+        logging.info('len(vocab) / len(ivocab) = %d/%d', len(vocab), len(ivocab))
         return vocab, ivocab
     
     def get_batches_per_epoch(self, mode):
@@ -723,7 +756,7 @@ class DMN_batch:
                     end_idx = v_i.shape[0]
                     start_idx = end_idx - batch_size
                 
-                #pdb.set_trace()
+                pdb.set_trace()
                 t = theano_fn(v_i[start_idx:end_idx,:,:], q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:,:])
                 pred[start_idx:end_idx,:,:] = t[0]
 

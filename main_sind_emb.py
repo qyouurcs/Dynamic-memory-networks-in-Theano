@@ -7,6 +7,7 @@ import json
 
 import utils
 import nn_utils
+import os
 
 # For logging.
 import climate
@@ -29,6 +30,7 @@ parser.add_argument('--input_mask_mode', type=str, default="sentence", help='inp
 parser.add_argument('--memory_hops', type=int, default=5, help='memory GRU steps')
 parser.add_argument('--batch_size', type=int, default=100, help='no commment')
 parser.add_argument('--data_dir', type=str, default="data/sind", help='data root directory')
+parser.add_argument('--save_dir', type=str, default="states_emb", help='data root directory')
 parser.add_argument('--l2', type=float, default=0, help='L2 regularization')
 parser.add_argument('--normalize_attention', type=bool, default=False, help='flag for enabling softmax on attention vector')
 parser.add_argument('--log_every', type=int, default=10, help='print information every x iteration')
@@ -135,7 +137,8 @@ def do_epoch_beam(epoch, skipped=0):
     all_candidates = [] 
     result_list = []
     json_fn = 't.json'
-    for i in range(0, batches_per_epoch):
+    #for i in range(0, batches_per_epoch):
+    for i in range(0, 2):
         step_data = dmn.step_beam(i)
     
         for caption,img_id in zip(step_data['captions'], step_data['img_ids']):
@@ -153,6 +156,9 @@ def do_epoch_beam(epoch, skipped=0):
     with open(json_fn, 'w') as json_fid:
         json.dump(result_list, json_fid)
 
+if not os.path.isdir(args.save_dir):
+    os.makedirs(args.save_dir)
+
 logging.info('mode = %s', args.mode)
 if args.mode == 'train':
     print "==> training"   	
@@ -167,7 +173,7 @@ if args.mode == 'train':
         
         epoch_loss, skipped = do_epoch('test', epoch, skipped)
         
-        state_name = 'states_emb/%s.epoch%d.test%.5f.state' % (network_name, epoch, epoch_loss)
+        state_name = '%s/%s.epoch%d.test%.5f.state' % (args.save_dir, network_name, epoch, epoch_loss)
 
         if (epoch % args.save_every == 0):    
             print "==> saving ... %s" % state_name

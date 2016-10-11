@@ -34,7 +34,7 @@ parser.add_argument('--learning_rate', type=float, default=0.01, help='Initial l
 parser.add_argument('--mode', type=str, default="train", help='mode: train or test. Test mode required load_state')
 parser.add_argument('--input_mask_mode', type=str, default="sentence", help='input_mask_mode: word or sentence')
 parser.add_argument('--memory_hops', type=int, default=5, help='memory GRU steps')
-parser.add_argument('--batch_size', type=int, default=5, help='no commment')
+parser.add_argument('--batch_size', type=int, default=20, help='no commment')
 parser.add_argument('--data_dir', type=str, default="data/sind", help='data root directory')
 parser.add_argument('--l2', type=float, default=0, help='L2 regularization')
 parser.add_argument('--normalize_attention', type=bool, default=False, help='flag for enabling softmax on attention vector')

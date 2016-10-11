@@ -19,7 +19,7 @@ if __name__ == '__main__':
             dict_imgs[key] = 1
 
     
-    with open(os.path.join(split_dir, 'annotions.txt')) as fid:
+    with open(os.path.join(split_dir, 'annotions_filtered.txt')) as fid:
         for aline in fid:
             key = aline.strip().split()[0]
             if key  not in dict_imgs:
