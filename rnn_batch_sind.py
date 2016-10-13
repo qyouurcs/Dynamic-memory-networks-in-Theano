@@ -159,6 +159,7 @@ class DMN_batch:
         n = prob_shuffled.shape[0] * prob_shuffled.shape[1]
         prob_rhp = T.reshape(prob_shuffled, (n, prob_shuffled.shape[2]))
         prob_sm = nn_utils.softmax_(prob_rhp)
+        self.pred = prob_sm
 
         n_f = prob_f_shuffled.shape[0] * prob_f_shuffled.shape[1]
         prob_f_rhp = T.reshape(prob_f_shuffled, (n_f, prob_f_shuffled.shape[2]))
@@ -200,12 +201,12 @@ class DMN_batch:
         if self.mode == 'train':
             print "==> compiling train_fn"
             self.train_fn = theano.function(inputs=[self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var], 
-                                            outputs=[self.prediction, self.loss],
+                                            outputs=[self.pred, self.loss],
                                             updates=updates)
         
         print "==> compiling test_fn"
         self.test_fn = theano.function(inputs=[self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var],
-                                       outputs=[self.prediction, self.loss])
+                                       outputs=[self.pred, self.loss])
         
         print "==> compiling pred_fn"
         self.pred_fn = theano.function(inputs=[self.q_var, self.answer_inp_var],
@@ -364,12 +365,6 @@ class DMN_batch:
         answers = np.array(answers).astype(np.int32)
         answers_mask = np.array(answers_mask).astype(floatX)
         answers_inp = np.stack(answers_inp, axis = 0)
-
-        #print questions.shape
-        #print answers.shape
-        #print answers_inp.shape
-        #print answers_mask.shape
-
 
         return questions, answers, answers_inp, answers_mask, stories
    
@@ -561,10 +556,10 @@ class DMN_batch:
                 beams = batch_of_beams[i]
                 for k, b in enumerate(beams):
                     idx_prev = b[-1]
-                    if idx_prev[-1] == self.vocab['.']:
-                        # This is the end.
-                        beam_c[i].append(b)
-                        continue
+                    #if idx_prev[-1] == self.vocab['.']:
+                    #    # This is the end.
+                    #    beam_c[i].append(b)
+                    #    continue
 
                     idx_prevs[i].append( idx_prev )
                     idx_of_idx[i].append(k)
@@ -597,9 +592,18 @@ class DMN_batch:
                 end_idx = i + batch_size
                 if end_idx > cnt_ins:
                     end_idx = cnt_ins
-                    start_idx = end_idx - batch_size
-                t = theano_fn(q_i[start_idx:end_idx,:,:], x_i[start_idx:end_idx,:,:])
-                pred[start_idx:end_idx,:,:] = t[0]
+                    start_idx = max(end_idx - batch_size,0)
+
+                if end_idx - start_idx < batch_size:
+                    t_q_i = np.zeros((batch_size, self.story_len, self.cnn_dim), dtype = 'float32')
+                    t_x_i = np.zeros((batch_size, max_b, self.vocab_size + 1), dtype = 'float32')
+                    t_q_i[0:(end_idx - start_idx),:,:] = q_i[start_idx:end_idx,:,:]
+                    t_x_i[0:(end_idx - start_idx),:,:] = x_i[start_idx:end_idx,:,:]
+                    t = theano_fn(t_q_i, t_x_i)
+                    pred[start_idx:end_idx,:,:] = t[0][0:(end_idx-start_idx),:,:]
+                else:
+                    t = theano_fn(q_i[start_idx:end_idx,:,:], x_i[start_idx:end_idx,:,:])
+                    pred[start_idx:end_idx,:,:] = t[0]
 
             p = np.zeros((pred.shape[0], pred.shape[2]))
             for i in range(pred.shape[0]):
@@ -615,13 +619,13 @@ class DMN_batch:
                         wordix = top_indices[row_idx][m]
                         beam_c[batch_i].append((batch_of_beams[batch_i][idx][0] + l[row_idx][wordix], batch_of_beams[batch_i][idx][1] + [wordix]))
                 idx_base += len(idx_i)
-
+                
             for i in range(len(beam_c)):
                 beam_c[i].sort(reverse = True) # descreasing order.
             for i, b in enumerate(beam_c):
                 batch_of_beams[i] = beam_c[i][:beam_size]
             nsteps += 1
-            if nsteps >= 20:
+            if nsteps >= 60:
                 break
         for beams in batch_of_beams:
             pred = [(b[0], b[1]) for b in beams ]

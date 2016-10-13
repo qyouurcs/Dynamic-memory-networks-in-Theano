@@ -645,10 +645,19 @@ class DMN_batch:
                 end_idx = i + batch_size
                 if end_idx > x_i.shape[0]:
                     end_idx = x_i.shape[0]
-                    start_idx = end_idx - batch_size
-                
-                t = theano_fn(q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:,:])
-                pred[start_idx:end_idx,:,:] = t[0]
+                    start_idx = max(end_idx - batch_size,0)
+
+                if end_idx - start_idx < batch_size:
+                    # Now, this is tricky. We need to manually increase the size.
+                    t_q_i = np.zeros((batch_size, self.cnn_dim), dtype = 'float32')
+                    t_x_i = np.zeros((batch_size, max_b, self.vocab_size + 1), dtype = 'float32')
+                    t_q_i[0:(end_idx - start_idx),:] = q_i[start_idx:end_idx,:]
+                    t_x_i[0:(end_idx - start_idx),:,:] = x_i[start_idx:end_idx,:,:]
+                    t = theano_fn(t_q_i, t_x_i)
+                    pred[start_idx:end_idx,:,:] = t[0][0:(end_idx-start_idx),:,:]
+                else:
+                    t = theano_fn(q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:,:])
+                    pred[start_idx:end_idx,:,:] = t[0]
 
             p = np.zeros((pred.shape[0], pred.shape[2]))
             for i in range(pred.shape[0]):

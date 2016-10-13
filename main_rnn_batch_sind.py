@@ -31,7 +31,7 @@ parser.add_argument('--truncate_gradient', type=int, default=5, help='truncate_g
 parser.add_argument('--learning_rate', type=float, default=0.01, help='Initial learning rate')
 
 parser.add_argument('--mode', type=str, default="train", help='mode: train or test. Test mode required load_state')
-parser.add_argument('--batch_size', type=int, default=80, help='no commment')
+parser.add_argument('--batch_size', type=int, default=60, help='no commment')
 parser.add_argument('--data_dir', type=str, default="data/sind", help='data root directory')
 parser.add_argument('--save_dir', type=str, default="states_rnn_show", help='data root directory')
 parser.add_argument('--l2', type=float, default=0, help='L2 regularization')
@@ -91,9 +91,11 @@ def do_epoch_beam(epoch, skipped=0):
         for caption,img_id in zip(step_data['captions'], step_data['img_ids']):
             top_prediction = caption[0]
             # ix 0 is the END token, skip that
-            candidate = ' '.join([ dmn.ivocab[ix] for ix in top_prediction[1] if ix != dmn.vocab['.'] and ix < len(dmn.vocab) ])
-            pdb.set_trace()
-            logging.info('loss: %f', caption[1])
+            candidate = ' '.join([ dmn.ivocab[ix] for ix in top_prediction[1] if ix < len(dmn.vocab) ])
+            candidates = candidate.split('.')
+            candidate = '.'.join(candidates[0:-1])
+
+            logging.info('loss: %f', top_prediction[0])
             logging.info('candidate: %s', candidate)
             all_candidates.append(candidate)
             cur_img = {}
@@ -103,7 +105,6 @@ def do_epoch_beam(epoch, skipped=0):
             # We need to calculate the BLEU score, thus we need to format the datas
             # the way did in neural talk, which has the perl codes for this.
 
-    pdb.set_trace()
     with open(json_fn, 'w') as json_fid:
         json.dump(result_list, json_fid)
 
@@ -130,7 +131,7 @@ def do_epoch(mode, epoch, skipped=0):
         if current_skip == 0:
             avg_loss += current_loss
             answers = np.reshape(answers, (answers.size,))
-            preds = prediction.argmax(axis = 1)
+            preds = prediction.argmax(axis = -1)
             for x,y in zip(answers, preds):
                 if x > 0:
                     y_true.append(x)

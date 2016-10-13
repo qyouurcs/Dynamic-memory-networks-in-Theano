@@ -485,16 +485,24 @@ class DMN_batch:
             # This is really pain full.
             # Since the batch_size is fixed when creating the module. Thus,
             # we need to make them equal to the batch_size.
-            pred = np.zeros((cnt_ins, x_i.shape[1]), dtype = 'float32')
+            pred = np.zeros((cnt_ins, self.SEQUENCE_LENGTH, self.vocab_size + 1), dtype = 'float32')
             for i in range(0, x_i.shape[0], batch_size):
                 start_idx = i
                 end_idx = i + batch_size
                 if end_idx > x_i.shape[0]:
                     end_idx = x_i.shape[0]
-                    start_idx = end_idx - batch_size
-                
-                t = theano_fn(q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:])
-                pred[start_idx:end_idx,:] = t[0]
+                    start_idx = max(end_idx - batch_size,0)
+                if end_idx - start_idx < batch_size:
+                    t_q_i = np.zeros((batch_size, self.cnn_dim), dtype = 'float32')
+                    t_x_i = np.zeros((batch_size, self.SEQUENCE_LENGTH-1), dtype = 'int32')
+
+                    t_q_i[0:(end_idx - start_idx),:] = q_i[start_idx:end_idx,:]
+                    t_x_i[0:(end_idx - start_idx),:] = x_i[start_idx:end_idx,:]
+                    t = theano_fn(t_q_i, t_x_i)
+                    pred[start_idx:end_idx,:] = t[0][0:(end_idx-start_idx),:]
+                else:
+                    t = theano_fn(q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:])
+                    pred[start_idx:end_idx,:] = t[0]
 
             p = np.zeros((pred.shape[0], pred.shape[2]))
             for i in range(pred.shape[0]):
