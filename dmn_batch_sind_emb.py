@@ -78,7 +78,6 @@ class DMN_batch:
 
         #inp_c_hist = T.dot(self.W_inp_emb_in, self.input_var) + self.b_inp_emb_in
         inp_var_shuffled = self.input_var.dimshuffle(1,2,0) #seq x cnn x batch
-        print inp_var_shuffled.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32')})
         def _dot(x, W, b):
             return  T.dot(W, x) + b.dimshuffle(0, 'x')
 
