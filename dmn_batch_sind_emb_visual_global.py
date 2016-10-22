@@ -129,22 +129,30 @@ class DMN_batch:
             if i == 0:
                 inp_1st_f, _ = theano.scan(fn = self.input_gru_step_forward,
                                     sequences = inp_emb[i,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy))
+                                    outputs_info=T.zeros_like(inp_dummy), 
+                                    truncate_gradient = self.truncate_gradient
+                                    )
 
                 inp_1st_b, _ = theano.scan(fn = self.input_gru_step_backward,
                                     sequences = inp_emb[i,:,::-1,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy))
+                                    outputs_info=T.zeros_like(inp_dummy),
+                                    truncate_gradient = self.truncate_gradient
+                                    )
                 # Now, combine them.
                 inp_1st = T.concatenate([inp_1st_f.dimshuffle(2,0,1), inp_1st_b.dimshuffle(2,0,1)], axis = -1)
                 self.inp_c = inp_1st.dimshuffle('x', 0, 1, 2)
             else:
                 inp_f, _ = theano.scan(fn = self.input_gru_step_forward,
                                     sequences = inp_emb[i,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy))
+                                    outputs_info=T.zeros_like(inp_dummy),
+                                    truncate_gradient = self.truncate_gradient
+                                    )
 
                 inp_b, _ = theano.scan(fn = self.input_gru_step_backward,
                                     sequences = inp_emb[i,:,::-1,:].dimshuffle(1,2,0),
-                                    outputs_info=T.zeros_like(inp_dummy))
+                                    outputs_info=T.zeros_like(inp_dummy),
+                                    truncate_gradient = self.truncate_gradient
+                                    )
                 # Now, combine them.
                 inp_fb = T.concatenate([inp_f.dimshuffle(2,0,1), inp_b.dimshuffle(2,0,1)], axis = -1)
                 self.inp_c = T.concatenate([self.inp_c, inp_fb.dimshuffle('x', 0, 1, 2)], axis = 0)
@@ -164,6 +172,35 @@ class DMN_batch:
         logging.info('self.cnn_dim = %d', self.cnn_dim)
 
         print "==> building question module"
+        # First is for the global glimpse.
+
+        q_var_3 = T.reshape(self.q_var, (self.batch_size, self.story_len, self.cnn_dim_fc))
+
+        q_var_shuffled = q_var_3.dimshuffle(1,2,0) # now: story_len * image_size * batch_size
+
+        # This is the RNN used to produce the Global Glimpse
+        self.W_qf_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.cnn_dim_fc))
+        self.W_qf_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.b_qf_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+        
+        self.W_qf_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.cnn_dim_fc))
+        self.W_qf_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.b_qf_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+        
+        self.W_qf_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.cnn_dim_fc))
+        self.W_qf_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.b_qf_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+        inp_dummy = theano.shared(np.zeros((self.dim, self.batch_size), dtype = floatX))
+
+        q_glb,_ = theano.scan(fn = self.q_gru_step_forward, 
+                                    sequences = q_var_shuffled,
+                                    outputs_info = [T.zeros_like(inp_dummy)],
+                                    truncate_gradient = self.truncate_gradient
+                                    )
+        q_glb_shuffled = q_glb.dimshuffle(2,0,1) # batch_size * seq_len * dim
+        q_glb_last = q_glb_shuffled[:,-1,:] # batch_size * dim
+
+        # Now, we also need to add the global glimpse, thus we need to use the rnn to build the attention glimpose.
         # Now, share the parameter with the input module.
         self.W_inp_emb_q = nn_utils.normal_param(std = 0.1, shape=(self.dim, self.cnn_dim_fc))
         self.b_inp_emb_q = nn_utils.normal_param(std = 0.1, shape=(self.dim,))
@@ -222,18 +259,24 @@ class DMN_batch:
 
         answer_inp_var_shuffled = self.answer_inp_var.dimshuffle(1,2,0)
         # Sounds good. Now, we need to map last_mem to a new space. 
-        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 2))
+        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 3))
         self.W_inp_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.vocab_size + 1))
 
         def _dot2(x, W):
             return  T.dot(W, x)
 
         answer_inp_var_shuffled_emb,_ = theano.scan(fn = _dot2, sequences = answer_inp_var_shuffled,
-                non_sequences = self.W_inp_emb ) # seq x dim x batch
+                non_sequences = self.W_inp_emb,
+                truncate_gradient = self.truncate_gradient
+                ) # seq x dim x batch
         
         # Now, we also need to embed the image and use it to do the memory. 
         #q_q_shuffled = self.q_q.dimshuffle(1,0) # dim * batch.
-        init_ans = T.concatenate([self.q_q, last_mem], axis = 0)
+        q_glb_dim = q_glb_last.dimshuffle(0,'x', 1) # batch_size * 1 * dim
+        q_glb_repmat = T.repeat(q_glb_dim, self.story_len, 1) # batch_size * len * dim
+        q_glb_rhp = T.reshape(q_glb_repmat, (q_glb_repmat.shape[0] * q_glb_repmat.shape[1], q_glb_repmat.shape[2]))
+
+        init_ans = T.concatenate([self.q_q, last_mem, q_glb_rhp.dimshuffle(1, 0)], axis = 0)
 
         mem_ans = T.dot(self.W_mem_emb, init_ans) # dim x batchsize.
 
@@ -270,7 +313,9 @@ class DMN_batch:
         #last_mem = printing.Print('prob_sm')(last_mem)
         results, _ = theano.scan(fn = self.answer_gru_step,
                 sequences = answer_inp,
-                outputs_info = [ dummy ])
+                outputs_info = [ dummy ],
+                truncate_gradient = self.truncate_gradient
+                )
         # Assume there is a start token 
         #print results.shape.eval({self.input_var: np.random.rand(10,4,4096).astype('float32'),
         #    self.q_var: np.random.rand(10, 4096).astype('float32'), 
@@ -282,7 +327,9 @@ class DMN_batch:
             
         # Now, we need to transform it to the probabilities.
 
-        prob,_ = theano.scan(fn = lambda x, w: T.dot(w, x), sequences = results, non_sequences = self.W_a )
+        prob,_ = theano.scan(fn = lambda x, w: T.dot(w, x), sequences = results, non_sequences = self.W_a, 
+                truncate_gradient = self.truncate_gradient
+                )
 
         prob_shuffled = prob.dimshuffle(2,0,1) # b * len * vocab
 
@@ -307,6 +354,9 @@ class DMN_batch:
                   self.W_inpb_res_in, self.W_inpb_res_hid, self.b_inpb_res,
                   self.W_inpb_upd_in, self.W_inpb_upd_hid, self.b_inpb_upd,
                   self.W_inpb_hid_in, self.W_inpb_hid_hid, self.b_inpb_hid,
+                  self.W_qf_res_in, self.W_qf_res_hid, self.b_qf_res, 
+                  self.W_qf_upd_in, self.W_qf_upd_hid, self.b_qf_upd,
+                  self.W_qf_hid_in, self.W_qf_hid_hid, self.b_qf_hid,
                   self.W_inp_emb_q, self.b_inp_emb_q,
                   self.W_mem_res_in, self.W_mem_res_hid, self.b_mem_res, 
                   self.W_mem_upd_in, self.W_mem_upd_hid, self.b_mem_upd,
@@ -380,6 +430,12 @@ class DMN_batch:
         return self.GRU_update(prev_h, x, self.W_inpf_res_in, self.W_inpf_res_hid, self.b_inpf_res, 
                                      self.W_inpf_upd_in, self.W_inpf_upd_hid, self.b_inpf_upd,
                                      self.W_inpf_hid_in, self.W_inpf_hid_hid, self.b_inpf_hid)
+
+    def q_gru_step_forward(self, x, prev_h):
+        return self.GRU_update(prev_h, x, self.W_qf_res_in, self.W_qf_res_hid, self.b_qf_res, 
+                                     self.W_qf_upd_in, self.W_qf_upd_hid, self.b_qf_upd,
+                                     self.W_qf_hid_in, self.W_qf_hid_hid, self.b_qf_hid)
+
 
     def input_gru_step_backward(self, x, prev_h):
         return self.GRU_update(prev_h, x, self.W_inpb_res_in, self.W_inpb_res_hid, self.b_inpb_res, 
