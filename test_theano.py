@@ -3,30 +3,59 @@ import theano.tensor as T
 import numpy as np
 import nn_utils
 
-input_var = T.tensor3('input_var') # (batch_size, seq_len, cnn_dim)
 
-input_var_rhp = T.reshape(input_var, (input_var.shape[0] * input_var.shape[1], input_var.shape[2]))
+e_x = T.fvector('e_x')
 
-prob = nn_utils.softmax(input_var_rhp)
-prob_rhp = T.reshape(prob, (input_var.shape[0], input_var.shape[1], input_var.shape[2]))
+e_x2 = T.set_subtensor(e_x[0],0)
 
-sf = theano.function(inputs = [input_var], outputs = prob_rhp)
 
-inp = np.random.rand(4,5,3).astype('float32')
 
-t = sf(inp)
+f = theano.function(inputs = [e_x], outputs = e_x2)
 
-print 't', t
-print 'sum(2)', t.sum(2)
-print 'sum(1)', t.sum(1)
-print 'sum(0)', t.sum(0)
+
+a = np.random.rand(5,).astype('float32')
+
+print a
+print f(a)
+
+ex = T.fmatrix('ex')
+
+def step(e_x):
+    e_x2 = T.set_subtensor(e_x[0],0)
+    return e_x, e_x2
+
+r,_ = theano.scan(fn = step, sequences = [ex])
+
+f2 = theano.function(inputs = [ex], outputs = r)
+
+x = np.random.rand(5,4).astype('float32')
+
+print x
 
 print
+print f2(x)[0]
+print
 
-t2 = np.reshape(t, (t.shape[0] * t.shape[1], t.shape[2]))
+print f2(x)[1]
 
-print 't2, sum(0)'
-print t2.sum(0)
 
-print 't2, sum(1)'
-print t2.sum(1)
+#input_var = T.matrix('input_var') # (batch_size, seq_len, cnn_dim)
+#att_mask = T.ivector('att_matrix')
+#
+#prob_sm = nn_utils.softmax_(input_var)
+#loss_vec = T.nnet.categorical_crossentropy(prob_sm, att_mask)
+#
+#sf = theano.function(inputs = [input_var, att_mask], outputs = loss_vec)
+#
+#inp = np.random.rand(6,5).astype('float32')
+#mask = np.random.rand(6,)
+#mask[:] = 0
+#mask = mask.astype('int32')
+#
+#t = sf(inp, mask)
+#
+#print inp
+#print mask
+#print 't', t.shape
+#print t
+#
