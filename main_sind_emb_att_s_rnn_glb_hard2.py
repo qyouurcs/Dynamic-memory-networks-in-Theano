@@ -34,7 +34,7 @@ parser.add_argument('--learning_rate', type=float, default=0.1, help='Initial le
 
 parser.add_argument('--mode', type=str, default="train", help='mode: train or test. Test mode required load_state')
 parser.add_argument('--input_mask_mode', type=str, default="sentence", help='input_mask_mode: word or sentence')
-parser.add_argument('--memory_hops', type=int, default=2, help='memory GRU steps')
+parser.add_argument('--memory_hops', type=int, default=3, help='memory GRU steps')
 parser.add_argument('--batch_size', type=int, default=15, help='no commment')
 parser.add_argument('--data_dir', type=str, default="data/sind", help='data root directory')
 parser.add_argument('--save_dir', type=str, default="states_emb", help='data root directory')
@@ -75,8 +75,8 @@ args_dict['word2vec'] = None
 
 # init class
 if args.network == 'dmn_batch_sind':
-    import dmn_batch_sind_emb_att_s_rnn_glb_hard
-    dmn = dmn_batch_sind_emb_att_s_rnn_glb_hard.DMN_batch(**args_dict)
+    import dmn_batch_sind_emb_att_s_rnn_glb_hard2
+    dmn = dmn_batch_sind_emb_att_s_rnn_glb_hard2.DMN_batch(**args_dict)
 
 else: 
     raise Exception("No such network known: " + args.network)

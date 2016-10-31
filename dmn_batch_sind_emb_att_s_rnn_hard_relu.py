@@ -228,28 +228,9 @@ class DMN_batch:
 
         #print 'inp_c', self.inp_c.shape.eval({att_input:np.random.rand(2,5,196,512).astype('float32')})
         print "==> building question module"
-        self.W_qf_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
-        self.W_qf_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
-        self.b_qf_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
-        
-        self.W_qf_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
-        self.W_qf_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
-        self.b_qf_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
-        
-        self.W_qf_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
-        self.W_qf_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
-        self.b_qf_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
-        
+
         inp_dummy = theano.shared(np.zeros((self.dim, self.batch_size), dtype = floatX))
         #print 'q_var_shuffled_emb', q_var_shuffled_emb.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        q_glb,_ = theano.scan(fn = self.q_gru_step_forward, 
-                                    sequences = q_var_shuffled_emb,
-                                    outputs_info = [T.zeros_like(inp_dummy)])
-        q_glb_shuffled = q_glb.dimshuffle(2,0,1) # batch_size * seq_len * dim
-        #print 'q_glb_shuffled', q_glb_shuffled.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        q_glb_last = q_glb_shuffled[:,-1,:] # batch_size * dim
-        #print 'q_glb_last', q_glb_last.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-
         q_net = layers.InputLayer(shape=(self.batch_size*self.story_len, self.dim), input_var=q_var_emb_rhp)
         if self.batch_norm:
             q_net = layers.BatchNormLayer(incoming=q_net)
@@ -269,6 +250,16 @@ class DMN_batch:
         self.W_mem_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.W_mem_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_mem_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+
+        self.W_mem_update1 = nn_utils.normal_param(std=0.1, shape=(self.dim , self.dim* 2))
+        self.b_mem_upd1 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+        self.W_mem_update2 = nn_utils.normal_param(std=0.1, shape=(self.dim,self.dim*2))
+        self.b_mem_upd2 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+        self.W_mem_update3 = nn_utils.normal_param(std=0.1, shape=(self.dim , self.dim*2))
+        self.b_mem_upd3 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+
+        self.W_mem_update = [self.W_mem_update1,self.W_mem_update2,self.W_mem_update3]
+        self.b_mem_update = [self.b_mem_upd1,self.b_mem_upd2, self.b_mem_upd3]
         
         self.W_1 = nn_utils.normal_param(std=0.1, shape=(self.dim, 7 * self.dim + 0))
         self.W_2 = nn_utils.normal_param(std=0.1, shape=(1, self.dim))
@@ -279,12 +270,10 @@ class DMN_batch:
         for iter in range(1, self.memory_hops + 1):
             #m = printing.Print('mem')(memory[iter-1])
             current_episode = self.new_episode(memory[iter - 1])
-            #current_episode = self.new_episode(m)
-            #current_episode = printing.Print('current_episode')(current_episode)
-            memory.append(self.GRU_update(memory[iter - 1], current_episode,
-                                          self.W_mem_res_in, self.W_mem_res_hid, self.b_mem_res, 
-                                          self.W_mem_upd_in, self.W_mem_upd_hid, self.b_mem_upd,
-                                          self.W_mem_hid_in, self.W_mem_hid_hid, self.b_mem_hid))                         
+            # Replace GRU with ReLU activation + MLP.
+            c = T.concatenate([memory[iter - 1], current_episode], axis = 0)
+            cur_mem = T.dot(self.W_mem_update[iter-1], c) + self.b_mem_update[iter-1].dimshuffle(0,'x')
+            memory.append(T.nnet.relu(cur_mem))
         
         last_mem_raw = memory[-1].dimshuffle((1, 0))
         
@@ -300,7 +289,7 @@ class DMN_batch:
 
         answer_inp_var_shuffled = self.answer_inp_var.dimshuffle(1,2,0)
         # Sounds good. Now, we need to map last_mem to a new space. 
-        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 3))
+        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 2))
         self.b_mem_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         self.W_inp_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.vocab_size + 1))
         self.b_inp_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
@@ -313,15 +302,7 @@ class DMN_batch:
         
         #print 'answer_inp_var_shuffled_emb', answer_inp_var_shuffled_emb.shape.eval({self.answer_inp_var:np.random.rand(2,5,8900).astype('float32')})
         # dim x batch_size * 5
-        q_glb_dim = q_glb_last.dimshuffle(0,'x', 1) # batch_size * 1 * dim
-        #print 'q_glb_dim', q_glb_dim.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        
-        q_glb_repmat = T.repeat(q_glb_dim, self.story_len, 1) # batch_size * len * dim
-        #print 'q_glb_repmat', q_glb_repmat.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        q_glb_rhp = T.reshape(q_glb_repmat, (q_glb_repmat.shape[0] * q_glb_repmat.shape[1], q_glb_repmat.shape[2]))
-        #print 'q_glb_rhp', q_glb_rhp.shape.eval({q_glb_last:np.random.rand(2,512).astype('float32')})
-
-        init_ans = T.concatenate([self.q_q, last_mem, q_glb_rhp.dimshuffle(1,0)], axis = 0)
+        init_ans = T.concatenate([self.q_q, last_mem], axis = 0)
         #print 'init_ans', init_ans.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32'), self.input_var:np.random.rand(2,5,196, 512).astype('float32')})
 
         mem_ans = T.tanh(T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x')) # dim x batchsize.
@@ -441,22 +422,23 @@ class DMN_batch:
                 self.W_inpb_res_in, self.W_inpb_res_hid, self.b_inpb_res,
                 self.W_inpb_upd_in, self.W_inpb_upd_hid, self.b_inpb_upd,
                 self.W_inpb_hid_in, self.W_inpb_hid_hid, self.b_inpb_hid,
-                self.W_qf_res_in, self.W_qf_res_hid, self.b_qf_res,
-                self.W_qf_upd_in, self.W_qf_upd_hid, self.b_qf_upd,
-                self.W_qf_hid_in, self.W_qf_hid_hid, self.b_qf_hid,
+                self.W_mem_emb, self.W_inp_emb,self.b_mem_emb, self.b_inp_emb,
                 self.W_mem_res_in, self.W_mem_res_hid, self.b_mem_res, 
                 self.W_mem_upd_in, self.W_mem_upd_hid, self.b_mem_upd,
                 self.W_mem_hid_in, self.W_mem_hid_hid, self.b_mem_hid, #self.W_b
-                self.W_mem_emb, self.W_inp_emb,self.b_mem_emb, self.b_inp_emb,
+                #self.W_mem_emb, self.W_inp_emb,self.b_mem_emb, self.b_inp_emb,
                 self.W_1, self.W_2, self.b_1, self.b_2, self.W_a,
                 self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
                 self.W_ans_upd_in, self.W_ans_upd_hid, self.b_ans_upd,
                 self.W_ans_hid_in, self.W_ans_hid_hid, self.b_ans_hid,
                 ]
+        self.params += self.W_mem_update
+        self.params += self.b_mem_update
                               
                               
         print "==> building loss layer and computing updates"
         reward_prob = prob_sm[T.arange(n), lbl]
+        reward_prob = T.reshape(reward_prob, (prob_shuffled.shape[0], prob_shuffled.shape[1]))
         #reward_prob = printing.Print('mean_r')(reward_prob)
 
         loss_vec = T.nnet.categorical_crossentropy(prob_sm, lbl)
@@ -478,8 +460,8 @@ class DMN_batch:
         alpha_entropy_c = theano.shared(np.float32(self.alpha_entropy_c), name='alpha_entropy_c')
         #mean_r = ( mask * reward_prob).sum() / mask.sum() # or just fixed it as 1.
         #mean_r = 1
-        mean_r = ( reward_prob * mask).sum() / mask.sum() # or just fixed it as 1.
-        #mean_r = printing.Print('mean_r')(mean_r)
+        mean_r = (self.answer_mask * reward_prob).sum(1) / self.answer_mask.sum(1) # or just fixed it as 1.
+        mean_r = mean_r[0,None]
         grads = T.grad(self.loss, wrt=self.params,
                      disconnected_inputs='raise',
                      known_grads={att_alpha_a:(mean_r - self.baseline_time)*
@@ -487,7 +469,7 @@ class DMN_batch:
 
             
         updates = lasagne.updates.adadelta(grads, self.params, learning_rate = self.learning_rate)
-        updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r
+        updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r.mean()
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
@@ -522,11 +504,6 @@ class DMN_batch:
         r = T.nnet.sigmoid(T.dot(W_res_in, x) + T.dot(W_res_hid, h) + b_res.dimshuffle(0, 'x'))
         _h = T.tanh(T.dot(W_hid_in, x) + r * T.dot(W_hid_hid, h) + b_hid.dimshuffle(0, 'x'))
         return z * h + (1 - z) * _h
-
-    def q_gru_step_forward(self, x, prev_h):
-        return self.GRU_update(prev_h, x, self.W_qf_res_in, self.W_qf_res_hid, self.b_qf_res, 
-                                     self.W_qf_upd_in, self.W_qf_upd_hid, self.b_qf_upd,
-                                     self.W_qf_hid_in, self.W_qf_hid_hid, self.b_qf_hid)
 
    
     def input_gru_step_forward(self, x, prev_h):

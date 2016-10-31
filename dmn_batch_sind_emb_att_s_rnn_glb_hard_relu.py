@@ -269,6 +269,16 @@ class DMN_batch:
         self.W_mem_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.W_mem_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_mem_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+
+        self.W_mem_update1 = nn_utils.normal_param(std=0.1, shape=(self.dim , self.dim* 2))
+        self.b_mem_upd1 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+        self.W_mem_update2 = nn_utils.normal_param(std=0.1, shape=(self.dim,self.dim*2))
+        self.b_mem_upd2 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+        self.W_mem_update3 = nn_utils.normal_param(std=0.1, shape=(self.dim , self.dim*2))
+        self.b_mem_upd3 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
+
+        self.W_mem_update = [self.W_mem_update1,self.W_mem_update2,self.W_mem_update3]
+        self.b_mem_update = [self.b_mem_upd1,self.b_mem_upd2, self.b_mem_upd3]
         
         self.W_1 = nn_utils.normal_param(std=0.1, shape=(self.dim, 7 * self.dim + 0))
         self.W_2 = nn_utils.normal_param(std=0.1, shape=(1, self.dim))
@@ -279,12 +289,10 @@ class DMN_batch:
         for iter in range(1, self.memory_hops + 1):
             #m = printing.Print('mem')(memory[iter-1])
             current_episode = self.new_episode(memory[iter - 1])
-            #current_episode = self.new_episode(m)
-            #current_episode = printing.Print('current_episode')(current_episode)
-            memory.append(self.GRU_update(memory[iter - 1], current_episode,
-                                          self.W_mem_res_in, self.W_mem_res_hid, self.b_mem_res, 
-                                          self.W_mem_upd_in, self.W_mem_upd_hid, self.b_mem_upd,
-                                          self.W_mem_hid_in, self.W_mem_hid_hid, self.b_mem_hid))                         
+            # Replace GRU with ReLU activation + MLP.
+            c = T.concatenate([memory[iter - 1], current_episode], axis = 0)
+            cur_mem = T.dot(self.W_mem_update[iter-1], c) + self.b_mem_update[iter-1].dimshuffle(0,'x')
+            memory.append(T.nnet.relu(cur_mem))
         
         last_mem_raw = memory[-1].dimshuffle((1, 0))
         
@@ -444,19 +452,23 @@ class DMN_batch:
                 self.W_qf_res_in, self.W_qf_res_hid, self.b_qf_res,
                 self.W_qf_upd_in, self.W_qf_upd_hid, self.b_qf_upd,
                 self.W_qf_hid_in, self.W_qf_hid_hid, self.b_qf_hid,
+                self.W_mem_emb, self.W_inp_emb,self.b_mem_emb, self.b_inp_emb,
                 self.W_mem_res_in, self.W_mem_res_hid, self.b_mem_res, 
                 self.W_mem_upd_in, self.W_mem_upd_hid, self.b_mem_upd,
                 self.W_mem_hid_in, self.W_mem_hid_hid, self.b_mem_hid, #self.W_b
-                self.W_mem_emb, self.W_inp_emb,self.b_mem_emb, self.b_inp_emb,
+                #self.W_mem_emb, self.W_inp_emb,self.b_mem_emb, self.b_inp_emb,
                 self.W_1, self.W_2, self.b_1, self.b_2, self.W_a,
                 self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
                 self.W_ans_upd_in, self.W_ans_upd_hid, self.b_ans_upd,
                 self.W_ans_hid_in, self.W_ans_hid_hid, self.b_ans_hid,
                 ]
+        self.params += self.W_mem_update
+        self.params += self.b_mem_update
                               
                               
         print "==> building loss layer and computing updates"
         reward_prob = prob_sm[T.arange(n), lbl]
+        reward_prob = T.reshape(reward_prob, (prob_shuffled.shape[0], prob_shuffled.shape[1]))
         #reward_prob = printing.Print('mean_r')(reward_prob)
 
         loss_vec = T.nnet.categorical_crossentropy(prob_sm, lbl)
@@ -478,8 +490,8 @@ class DMN_batch:
         alpha_entropy_c = theano.shared(np.float32(self.alpha_entropy_c), name='alpha_entropy_c')
         #mean_r = ( mask * reward_prob).sum() / mask.sum() # or just fixed it as 1.
         #mean_r = 1
-        mean_r = ( reward_prob * mask).sum() / mask.sum() # or just fixed it as 1.
-        #mean_r = printing.Print('mean_r')(mean_r)
+        mean_r = (self.answer_mask * reward_prob).sum(1) / self.answer_mask.sum(1) # or just fixed it as 1.
+        mean_r = mean_r[0,None]
         grads = T.grad(self.loss, wrt=self.params,
                      disconnected_inputs='raise',
                      known_grads={att_alpha_a:(mean_r - self.baseline_time)*
@@ -487,7 +499,7 @@ class DMN_batch:
 
             
         updates = lasagne.updates.adadelta(grads, self.params, learning_rate = self.learning_rate)
-        updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r
+        updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r.mean()
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':

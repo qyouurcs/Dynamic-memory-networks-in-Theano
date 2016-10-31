@@ -306,7 +306,7 @@ class DMN_batch:
         self.b_inp_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         def _dot2(x, W, b):
-            return  T.tanh(T.dot(W, x) + b.dimshuffle(0,'x'))
+            return  T.dot(W, x) + b.dimshuffle(0,'x')
 
         answer_inp_var_shuffled_emb,_ = theano.scan(fn = _dot2, sequences = answer_inp_var_shuffled,
                 non_sequences = [self.W_inp_emb,self.b_inp_emb] ) # seq x dim x batch
@@ -324,7 +324,7 @@ class DMN_batch:
         init_ans = T.concatenate([self.q_q, last_mem, q_glb_rhp.dimshuffle(1,0)], axis = 0)
         #print 'init_ans', init_ans.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32'), self.input_var:np.random.rand(2,5,196, 512).astype('float32')})
 
-        mem_ans = T.tanh(T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x')) # dim x batchsize.
+        mem_ans = T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x') # dim x batchsize.
         mem_ans_dim = mem_ans.dimshuffle('x',0,1)
         # seq + 1 x dim x batch 
         answer_inp = T.concatenate([mem_ans_dim, answer_inp_var_shuffled_emb], axis = 0)
@@ -457,6 +457,8 @@ class DMN_batch:
                               
         print "==> building loss layer and computing updates"
         reward_prob = prob_sm[T.arange(n), lbl]
+        reward_prob = T.reshape(reward_prob, (prob_shuffled.shape[0], prob_shuffled.shape[1]))
+
         #reward_prob = printing.Print('mean_r')(reward_prob)
 
         loss_vec = T.nnet.categorical_crossentropy(prob_sm, lbl)
@@ -476,9 +478,10 @@ class DMN_batch:
         self.loss = self.loss_ce + self.loss_l2
         self.baseline_time = theano.shared(np.float32(0.), name='baseline_time')
         alpha_entropy_c = theano.shared(np.float32(self.alpha_entropy_c), name='alpha_entropy_c')
-        #mean_r = ( mask * reward_prob).sum() / mask.sum() # or just fixed it as 1.
-        #mean_r = 1
-        mean_r = ( reward_prob * mask).sum() / mask.sum() # or just fixed it as 1.
+        mean_r = (self.answer_mask * reward_prob).sum(1) / self.answer_mask.sum(1) # or just fixed it as 1.
+        mean_r = mean_r[0,None]
+        #mean_r = 1.0
+        #mean_r = ( reward_prob * mask).sum() / mask.sum() # or just fixed it as 1.
         #mean_r = printing.Print('mean_r')(mean_r)
         grads = T.grad(self.loss, wrt=self.params,
                      disconnected_inputs='raise',
@@ -487,7 +490,7 @@ class DMN_batch:
 
             
         updates = lasagne.updates.adadelta(grads, self.params, learning_rate = self.learning_rate)
-        updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r
+        updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r.mean()
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
@@ -639,8 +642,8 @@ class DMN_batch:
             loaded_params = dict['params']
             for (x, y) in zip(self.params, loaded_params):
                 x.set_value(y)
-            self.baseline_time = dict['baseline']
 
+            self.baseline_time = dict['baseline']
     def _process_batch_sind(self, batch_index, split = 'train'):
         # Now, randomly select one story.
         start_index = self.batch_size * batch_index
