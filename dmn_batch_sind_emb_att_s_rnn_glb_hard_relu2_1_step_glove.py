@@ -258,7 +258,7 @@ class DMN_batch:
         # Sounds good. Now, we need to map last_mem to a new space. 
         self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 2))
         self.b_mem_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
-        self.W_inp_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.vocab_size + 1))
+        self.W_inp_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.word_vector_size))
         self.b_inp_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         def _dot2(x, W, b):
@@ -581,6 +581,7 @@ class DMN_batch:
                 obj = {
                     'params' : [x.get_value() for x in self.params],
                     'epoch' : epoch, 
+                    'word2vec': self.word2vec,
                     'baseline': self.baseline_time,
                     'gradient_value': (kwargs['gradient_value'] if 'gradient_value' in kwargs else 0)
                 },
@@ -677,11 +678,22 @@ class DMN_batch:
                         a.append(self.vocab_size) # start token.
                         a.extend(input_anno[1][2]) # this is the index for the captions.
 
-                        a_inp = np.zeros((max_ans_len, self.vocab_size + 1), dtype = floatX)
+                        a_inp = np.zeros((max_ans_len, self.word_vector_size), dtype = floatX)
                         a_mask = []
                         # add the start token firstly
-                        for ans_idx, w_idx in enumerate(a):
-                            a_inp[ans_idx, w_idx] = 1
+                        a_inp[0, :] = utils.process_word2( word = "#START#",
+                                                                  word2vec = self.word2vec,
+                                                                  vocab = self.vocab,
+                                                                  word_vector_size = self.word_vector_size,
+                                                                  to_return = 'word2vec' )
+
+                        for ans_idx, w_idx in enumerate(a[1:]):
+                            a_inp[ans_idx + 1, :] = utils.process_word2( word = self.ivocab[w_idx],
+                                                                        word2vec = self.word2vec,
+                                                                        vocab = self.vocab,
+                                                                        word_vector_size = self.word_vector_size,
+                                                                        to_return = 'word2vec' )
+
 
                         a_mask = [ 1 for i in range(len(a) -1) ]
                         answer_idx.append(len(a_mask))

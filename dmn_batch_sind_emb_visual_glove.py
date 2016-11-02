@@ -456,10 +456,11 @@ class DMN_batch:
     def load_state(self, file_name):
         print "==> loading state %s" % file_name
         with open(file_name, 'r') as load_file:
-            dict = pickle.load(load_file)
-            loaded_params = dict['params']
+            dict_m = pickle.load(load_file)
+            loaded_params = dict_m['params']
             for (x, y) in zip(self.params, loaded_params):
                 x.set_value(y)
+            self.word2vec = dict_m['word2vec']
 
     def _process_batch_sind(self, batch_index, split = 'train'):
         # Now, randomly select one story.

@@ -137,6 +137,9 @@ def process_word(word, word2vec, vocab, ivocab, word_vector_size, to_return="wor
 
 
 def process_word2(word, word2vec, vocab, word_vector_size, to_return="word2vec", silent=False):
+
+    if word == '[male]' or word == '[female]':
+        word = word[1:-1]
     
     if to_return == "word2vec":
         if not word in word2vec:
