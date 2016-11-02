@@ -57,7 +57,6 @@ class DMN_batch:
         self.learning_rate = learning_rate
 
         self.trng = RandomStreams(1234)
-        self.std = .11
         
         self.word2vec = word2vec
         self.word_vector_size = word_vector_size
@@ -100,12 +99,12 @@ class DMN_batch:
         logging.info('self.cnn_dim = %d', self.cnn_dim)
         logging.info('self.cnn_dim_fc = %d', self.cnn_dim_fc)
         logging.info('self.dim = %d', self.dim)
-        self.W_q_emb_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.cnn_dim_fc))
+        self.W_q_emb_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.cnn_dim_fc))
         self.b_q_emb_in = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         logging.info('Building the glob attention model')
-        self.W_glb_att_1 = nn_utils.normal_param(std = self.std, shape = (self.dim, 2 * self.dim))
-        self.W_glb_att_2 = nn_utils.normal_param(std = self.std, shape = (1, self.dim))
+        self.W_glb_att_1 = nn_utils.normal_param(std = 0.1, shape = (self.dim, 2 * self.dim))
+        self.W_glb_att_2 = nn_utils.normal_param(std = 0.1, shape = (1, self.dim))
         self.b_glb_att_1 = nn_utils.constant_param(value = 0.0, shape = (self.dim,))
         self.b_glb_att_2 = nn_utils.constant_param(value = 0.0, shape = (1,))
 
@@ -139,7 +138,7 @@ class DMN_batch:
 
         # att_alpha: (batch x seq) x seq)
         
-        self.W_inp_emb_in = nn_utils.normal_param(std= self.std, shape=(self.dim, self.cnn_dim))
+        self.W_inp_emb_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.cnn_dim))
         self.b_inp_emb_in = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         inp_rhp = T.reshape(self.input_var, (self.batch_size* self.story_len* self.patches, self.cnn_dim))
@@ -177,16 +176,16 @@ class DMN_batch:
 
         #print 'inp_c', self.inp_c.shape.eval({att_input:np.random.rand(2,5,196,512).astype('float32')})
         print "==> building question module"
-        self.W_qf_res_in = nn_utils.normal_param(std= self.std, shape=(self.dim, self.dim))
-        self.W_qf_res_hid = nn_utils.normal_param(std= self.std, shape=(self.dim, self.dim))
+        self.W_qf_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_qf_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_qf_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_qf_upd_in = nn_utils.normal_param(std= self.std, shape=(self.dim, self.dim))
-        self.W_qf_upd_hid = nn_utils.normal_param(std= self.std, shape=(self.dim, self.dim))
+        self.W_qf_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_qf_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_qf_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_qf_hid_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
-        self.W_qf_hid_hid = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
+        self.W_qf_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_qf_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_qf_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
         inp_dummy = theano.shared(np.zeros((self.dim, self.batch_size), dtype = floatX))
@@ -207,30 +206,30 @@ class DMN_batch:
         self.q_q = layers.get_output(q_net).dimshuffle(1,0)
 
         print "==> creating parameters for memory module"
-        self.W_mem_res_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
-        self.W_mem_res_hid = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
+        self.W_mem_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_mem_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_mem_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_mem_upd_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
-        self.W_mem_upd_hid = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
+        self.W_mem_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_mem_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_mem_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_mem_hid_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
-        self.W_mem_hid_hid = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
+        self.W_mem_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
+        self.W_mem_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_mem_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
-        self.W_mem_update1 = nn_utils.normal_param(std=self.std, shape=(self.dim , self.dim* 2))
+        self.W_mem_update1 = nn_utils.normal_param(std=0.1, shape=(self.dim , self.dim* 2))
         self.b_mem_upd1 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
-        self.W_mem_update2 = nn_utils.normal_param(std=self.std, shape=(self.dim,self.dim*2))
+        self.W_mem_update2 = nn_utils.normal_param(std=0.1, shape=(self.dim,self.dim*2))
         self.b_mem_upd2 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
-        self.W_mem_update3 = nn_utils.normal_param(std=self.std, shape=(self.dim , self.dim*2))
+        self.W_mem_update3 = nn_utils.normal_param(std=0.1, shape=(self.dim , self.dim*2))
         self.b_mem_upd3 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         self.W_mem_update = [self.W_mem_update1,self.W_mem_update2,self.W_mem_update3]
         self.b_mem_update = [self.b_mem_upd1,self.b_mem_upd2, self.b_mem_upd3]
         
-        self.W_1 = nn_utils.normal_param(std=self.std, shape=(self.dim, 4 * self.dim + 0))
-        self.W_2 = nn_utils.normal_param(std=self.std, shape=(1, self.dim))
+        self.W_1 = nn_utils.normal_param(std=0.1, shape=(self.dim, 7 * self.dim + 0))
+        self.W_2 = nn_utils.normal_param(std=0.1, shape=(1, self.dim))
         self.b_1 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         self.b_2 = nn_utils.constant_param(value=0.0, shape=(1,))
         print "==> building episodic memory module (fixed number of steps: %d)" % self.memory_hops
@@ -257,9 +256,9 @@ class DMN_batch:
 
         answer_inp_var_shuffled = self.answer_inp_var.dimshuffle(1,2,0)
         # Sounds good. Now, we need to map last_mem to a new space. 
-        self.W_mem_emb = nn_utils.normal_param(std = self.std, shape = (self.dim, self.dim * 3))
+        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 2))
         self.b_mem_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
-        self.W_inp_emb = nn_utils.normal_param(std = self.std, shape = (self.dim, self.vocab_size + 1))
+        self.W_inp_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.vocab_size + 1))
         self.b_inp_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         def _dot2(x, W, b):
@@ -279,28 +278,34 @@ class DMN_batch:
         q_glb_rhp = T.reshape(q_glb_repmat, (q_glb_repmat.shape[0] * q_glb_repmat.shape[1], q_glb_repmat.shape[2]))
         #print 'q_glb_rhp', q_glb_rhp.shape.eval({q_glb_last:np.random.rand(2,512).astype('float32')})
 
-        init_ans = T.concatenate([self.q_q, last_mem, q_glb_rhp.dimshuffle(1,0)], axis = 0)
+        init_ans = T.concatenate([self.q_q, last_mem], axis = 0)
         #print 'init_ans', init_ans.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32'), self.input_var:np.random.rand(2,5,196, 512).astype('float32')})
 
-        #mem_ans = T.tanh(T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x')) # dim x batchsize.
         mem_ans = T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x') # dim x batchsize
         mem_ans_dim = mem_ans.dimshuffle('x',0,1)
-        # seq + 1 x dim x batch 
         answer_inp = T.concatenate([mem_ans_dim, answer_inp_var_shuffled_emb], axis = 0)
+
+        q_glb_rhp = q_glb_rhp.dimshuffle(1,0)
+        q_glb_rhp = q_glb_rhp.dimshuffle('x', 0, 1)
+        q_glb_step = T.repeat(q_glb_rhp, answer_inp.shape[0], 0)
+
+        #mem_ans = T.tanh(T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x')) # dim x batchsize.
+        # seq + 1 x dim x batch 
+        answer_inp = T.concatenate([answer_inp, q_glb_step], axis = 1)
         dummy = theano.shared(np.zeros((self.dim, self.batch_size * self.story_len), dtype=floatX))
 
-        self.W_a = nn_utils.normal_param(std=self.std, shape=(self.vocab_size + 1, self.dim))
+        self.W_a = nn_utils.normal_param(std=0.1, shape=(self.vocab_size + 1, self.dim))
         
-        self.W_ans_res_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
-        self.W_ans_res_hid = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
+        self.W_ans_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
+        self.W_ans_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_ans_upd_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
-        self.W_ans_upd_hid = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
+        self.W_ans_upd_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
+        self.W_ans_upd_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_upd = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
-        self.W_ans_hid_in = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
-        self.W_ans_hid_hid = nn_utils.normal_param(std=self.std, shape=(self.dim, self.dim))
+        self.W_ans_hid_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
+        self.W_ans_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
         results, _ = theano.scan(fn = self.answer_gru_step,
@@ -438,7 +443,7 @@ class DMN_batch:
                      (att_alpha_sample/(att_alpha_a + 1e-10)) + alpha_entropy_c*(T.log(att_alpha_a + 1e-10) + 1)})
 
             
-        updates = lasagne.updates.adam(grads, self.params, learning_rate = self.learning_rate)
+        updates = lasagne.updates.adadelta(grads, self.params, learning_rate = self.learning_rate)
         updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r.mean()
         #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
@@ -532,7 +537,7 @@ class DMN_batch:
         return e_x / e_x.sum(axis = -1, keepdims = True), e_x2 / e_x2.sum(axis = -1, keepdims = True)
     
     def new_attention_step(self, ct, prev_g, mem, q_q):
-        z = T.concatenate([ct * q_q, ct * mem, T.abs_(ct - q_q), T.abs_(ct - mem)], axis=0)
+        z = T.concatenate([ct, mem, q_q, ct * q_q, ct * mem, (ct - q_q) ** 2, (ct - mem) ** 2], axis=0)
         
         l_1 = T.dot(self.W_1, z) + self.b_1.dimshuffle(0, 'x')
         l_1 = T.tanh(l_1)
@@ -583,25 +588,13 @@ class DMN_batch:
                 protocol = -1
             )
     
+    
     def load_state(self, file_name):
         print "==> loading state %s" % file_name
         with open(file_name, 'r') as load_file:
             dict = pickle.load(load_file)
             loaded_params = dict['params']
             for (x, y) in zip(self.params, loaded_params):
-                x.set_value(y)
-            self.baseline_time = dict['baseline']
-
-
-    def load_state_ins(self, file_name):
-        print "==> loading state %s" % file_name
-        param_norm = np.max([utils.get_norm(x.get_value()) for x in self.params])
-        print 'param_norm',param_norm
-        with open(file_name, 'r') as load_file:
-            dict = pickle.load(load_file)
-            loaded_params = dict['params']
-            for (x, y) in zip(self.params, loaded_params):
-                print x, x.name, y.shape, utils.get_norm(y)
                 x.set_value(y)
             self.baseline_time = dict['baseline']
 
