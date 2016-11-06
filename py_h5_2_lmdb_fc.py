@@ -54,14 +54,9 @@ if __name__ == '__main__':
                 hid = h5py.File(h5_list[i_idx],'r')
                 fea = hid['fea'][:]
                 fns = hid['fns'][:]
-                try:
-                    print fea.shape
-                    print fea.shape[1]
-                except:
-                    pdb.set_trace()
-                    pass
 
                 for fn, f in zip(fns, fea):
+                    #print fn
                     key = os.path.basename(fn).split('_')[0] 
                     if key not in dict_fn2story:
                         continue
@@ -74,16 +69,18 @@ if __name__ == '__main__':
                         datum.channels = fea.shape[1]
                         datum.height = fea.shape[2]
                         datum.width = fea.shape[3]
+                        # f: 512 x 14 x 14
+                        f_snake = np.zeros_like(f, dtype = 'float32')
+                        for i in range(0, f.shape[1], 2):
+                            f_snake[:,i,:] = f[:,i,:]
+                            f_snake[:,i+1,:] = f[:,i+1,::-1]
+
+                        datum.data = f_snake.tobytes()
+
                     elif len(f.shape) == 1:
                         datum.channels = fea.shape[1]
                         datum.height = 1
                         datum.width = 1
-                    # f: 512 x 14 x 14
-                    f_snake = np.zeros_like(f, dtype = 'float32')
-                    for i in range(0, f.shape[1], 2):
-                        f_snake[:,i,:] = f[:,i,:]
-                        f_snake[:,i+1,:] = f[:,i+1,::-1]
-
-                    datum.data = f_snake.tobytes()
+                        datum.data = np.asarray(f,dtype='float32').tobytes()
                     lmdb_txn.put(key_lmdb.encode('ascii'), datum.SerializeToString())
 

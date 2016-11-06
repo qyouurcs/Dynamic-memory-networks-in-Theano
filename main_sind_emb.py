@@ -137,9 +137,10 @@ def do_epoch_beam(epoch, skipped=0):
     all_candidates = [] 
     result_list = []
     json_fn = 't.json'
-    #for i in range(0, batches_per_epoch):
-    for i in range(0, 2):
-        step_data = dmn.step_beam(i)
+    for i in range(0, batches_per_epoch):
+    #for i in range(0, 2):
+        logging.info('i = %d, total = %d', i, batches_per_epoch)
+        step_data = dmn.step_beam(i, 'test')
     
         for caption,img_id in zip(step_data['captions'], step_data['img_ids']):
             top_prediction = caption[0]

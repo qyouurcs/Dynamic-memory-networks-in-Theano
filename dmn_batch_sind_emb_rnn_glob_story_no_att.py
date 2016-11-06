@@ -1,10 +1,8 @@
 '''
 Delete the RNN on the local patches.
 
-1. The attention to select the related image.
-2. The use memory on the local regions of the image.
-3. The rnn on sentences make sure they are good to go.
-4. Global glimpse.
+1. Use all the images in the same story to build the initial state to the rnn.
+2. Use each image's locla patches to attend.
 
 '''
 import random
@@ -13,7 +11,6 @@ import lmdb
 import caffe
 
 import theano
-#import theano.tensor as T
 from theano.compile.nanguardmode import NanGuardMode
 from theano import tensor as T, function, printing
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
@@ -84,7 +81,6 @@ class DMN_batch:
         self.train_story = self.train_dict_story.keys()
         self.test_story = self.test_dict_story.keys()
         self.vocab_size = len(self.vocab)
-        self.alpha_entropy_c = 0.02 # for hard attention.
         
         # This is the local patch of each image.
         self.input_var = T.tensor4('input_var') # (batch_size, seq_len, patches, cnn_dim)
@@ -102,19 +98,13 @@ class DMN_batch:
         self.W_q_emb_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.cnn_dim_fc))
         self.b_q_emb_in = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
-        logging.info('Building the glob attention model')
-        self.W_glb_att_1 = nn_utils.normal_param(std = 0.1, shape = (self.dim, 2 * self.dim))
-        self.W_glb_att_2 = nn_utils.normal_param(std = 0.1, shape = (1, self.dim))
-        self.b_glb_att_1 = nn_utils.constant_param(value = 0.0, shape = (self.dim,))
-        self.b_glb_att_2 = nn_utils.constant_param(value = 0.0, shape = (1,))
-
         q_var_shuffled = self.q_var.dimshuffle(1,2,0) # seq x cnn x batch.
 
         def _dot(x, W, b):
             return T.tanh( T.dot(W, x) + b.dimshuffle(0, 'x'))
 
         q_var_shuffled_emb,_ = theano.scan(fn = _dot, sequences= q_var_shuffled, non_sequences = [self.W_q_emb_in, self.b_q_emb_in])
-        print 'q_var_shuffled_emb', q_var_shuffled_emb.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
+        #print 'q_var_shuffled_emb', q_var_shuffled_emb.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
         q_var_emb =  q_var_shuffled_emb.dimshuffle(2,0,1) # batch x seq x emb_size
         q_var_emb_ext = q_var_emb.dimshuffle(0,'x',1,2)
         q_var_emb_ext = T.repeat(q_var_emb_ext, q_var_emb.shape[1],1) # batch x seq x seq x emb_size
@@ -124,20 +114,7 @@ class DMN_batch:
         q_idx = T.arange(self.story_len).dimshuffle('x',0)
         q_idx = T.repeat(q_idx,self.batch_size, axis = 0)
         q_idx = T.reshape(q_idx, (q_idx.shape[0]* q_idx.shape[1],))
-        print q_idx.eval()
-        print 'q_var_emb_rhp.shape', q_var_emb_rhp.shape.eval({self.q_var:np.random.rand(3,5,4096).astype('float32')})
-        print 'q_var_emb_ext_rhp.shape', q_var_emb_ext_rhp.shape.eval({self.q_var:np.random.rand(3,5,4096).astype('float32')})
 
-        #att_alpha,_ = theano.scan(fn = self.new_attention_step_glob, sequences = [q_var_emb_rhp, q_var_emb_ext_rhp, q_idx] )
-        alpha,_ = theano.scan(fn = self.new_attention_step_glob, sequences = [q_var_emb_rhp, q_var_emb_ext_rhp, q_idx] )
-
-        att_alpha = alpha[1]
-        att_alpha_a = alpha[0]
-        #print results.shape.eval({self.input_var: np.random.rand(3,4,4096).astype('float32'),
-        print att_alpha.shape.eval({self.q_var:np.random.rand(3,5,4096).astype('float32')})
-
-        # att_alpha: (batch x seq) x seq)
-        
         self.W_inp_emb_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.cnn_dim))
         self.b_inp_emb_in = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
@@ -145,37 +122,12 @@ class DMN_batch:
         inp_rhp_dimshuffled = inp_rhp.dimshuffle(1,0)
         inp_rhp_emb = T.dot(self.W_inp_emb_in, inp_rhp_dimshuffled) + self.b_inp_emb_in.dimshuffle(0,'x')
         inp_rhp_emb_dimshuffled = inp_rhp_emb.dimshuffle(1,0)
-        inp_emb_raw = T.reshape(inp_rhp_emb_dimshuffled, (self.batch_size, self.story_len, self.patches, self.cnn_dim))
+        inp_emb_raw = T.reshape(inp_rhp_emb_dimshuffled, (self.batch_size * self.story_len, self.patches, self.cnn_dim))
         inp_emb = T.tanh(inp_emb_raw) # Just follow the paper DMN for visual and textual QA.
-        #inp_emb = inp_emb.dimshuffle(0,'x', 1,2)
-        #inp_emb = T.repeat(inp_emb, self.story_len, 1)
 
-        #print inp_emb.shape.eval({self.input_var:np.random.rand(3,5,196, 4096).astype('float32')})
+        self.inp_c = inp_emb.dimshuffle(1,2,0)
 
-        att_alpha_sample = self.trng.multinomial(pvals = att_alpha, dtype=theano.config.floatX)
-        att_mask = att_alpha_sample.argmax(1)
-        print 'att_mask.shape', att_mask.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        print 'att_mask', att_mask.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-
-        # No time to fix the hard attention, now we use the soft attention.
-        idx_t = T.repeat(T.arange(self.input_var.shape[0]), self.input_var.shape[1])
-        print 'idx_t', idx_t.eval({self.input_var:np.random.rand(2,5,196,512).astype('float32')})
-        att_input =  inp_emb[idx_t, att_mask,:,:] # (batch x seq) x batches x emb_size
-        att_input = T.reshape(att_input, (self.batch_size, self.story_len, self.patches, self.dim))
-        print 'att_input', att_input.shape.eval({self.input_var:np.random.rand(2,5,196,512).astype('float32'),self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        
-        # Now, it's the same size with the input_var, but we have only one image for each one of input.
-        # Now, we can use the rnn on these local imgs to learn the 
-        # Now, we use a bi-directional GRU to produce the input.
-        # Forward GRU.
-
-
-        self.inp_c = T.reshape(att_input, (att_input.shape[0] * att_input.shape[1], att_input.shape[2], att_input.shape[3]))
-        self.inp_c = self.inp_c.dimshuffle(1,2,0)
-
-
-        #print 'inp_c', self.inp_c.shape.eval({att_input:np.random.rand(2,5,196,512).astype('float32')})
-        print "==> building question module"
+        logging.info('building question module')
         self.W_qf_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.W_qf_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_qf_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
@@ -189,14 +141,13 @@ class DMN_batch:
         self.b_qf_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         
         inp_dummy = theano.shared(np.zeros((self.dim, self.batch_size), dtype = floatX))
-        #print 'q_var_shuffled_emb', q_var_shuffled_emb.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
+
+        q_var_shuffled_emb_reversed = q_var_shuffled_emb[::-1,:,:] # seq x emb_size x batch
         q_glb,_ = theano.scan(fn = self.q_gru_step_forward, 
-                                    sequences = q_var_shuffled_emb,
+                                    sequences = q_var_shuffled_emb_reversed,
                                     outputs_info = [T.zeros_like(inp_dummy)])
         q_glb_shuffled = q_glb.dimshuffle(2,0,1) # batch_size * seq_len * dim
-        #print 'q_glb_shuffled', q_glb_shuffled.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
         q_glb_last = q_glb_shuffled[:,-1,:] # batch_size * dim
-        #print 'q_glb_last', q_glb_last.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
 
         q_net = layers.InputLayer(shape=(self.batch_size*self.story_len, self.dim), input_var=q_var_emb_rhp)
         if self.batch_norm:
@@ -205,7 +156,8 @@ class DMN_batch:
             q_net = layers.DropoutLayer(q_net, p=self.dropout)
         self.q_q = layers.get_output(q_net).dimshuffle(1,0)
 
-        print "==> creating parameters for memory module"
+        #print "==> creating parameters for memory module"
+        logging.info('creating parameters for memory module')
         self.W_mem_res_in = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.W_mem_res_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_mem_res = nn_utils.constant_param(value=0.0, shape=(self.dim,))
@@ -232,7 +184,7 @@ class DMN_batch:
         self.W_2 = nn_utils.normal_param(std=0.1, shape=(1, self.dim))
         self.b_1 = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         self.b_2 = nn_utils.constant_param(value=0.0, shape=(1,))
-        print "==> building episodic memory module (fixed number of steps: %d)" % self.memory_hops
+        logging.info('==> building episodic memory module (fixed number of steps: %d)', self.memory_hops)
         memory = [self.q_q.copy()]
         for iter in range(1, self.memory_hops + 1):
             #m = printing.Print('mem')(memory[iter-1])
@@ -256,7 +208,7 @@ class DMN_batch:
 
         answer_inp_var_shuffled = self.answer_inp_var.dimshuffle(1,2,0)
         # Sounds good. Now, we need to map last_mem to a new space. 
-        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 3))
+        self.W_mem_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.dim * 2))
         self.b_mem_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
         self.W_inp_emb = nn_utils.normal_param(std = 0.1, shape = (self.dim, self.vocab_size + 1))
         self.b_inp_emb = nn_utils.constant_param(value=0.0, shape=(self.dim,))
@@ -268,25 +220,21 @@ class DMN_batch:
         answer_inp_var_shuffled_emb,_ = theano.scan(fn = _dot2, sequences = answer_inp_var_shuffled,
                 non_sequences = [self.W_inp_emb,self.b_inp_emb] ) # seq x dim x batch
         
-        #print 'answer_inp_var_shuffled_emb', answer_inp_var_shuffled_emb.shape.eval({self.answer_inp_var:np.random.rand(2,5,8900).astype('float32')})
-        # dim x batch_size * 5
-        q_glb_dim = q_glb_last.dimshuffle(0,'x', 1) # batch_size * 1 * dim
-        #print 'q_glb_dim', q_glb_dim.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        
-        q_glb_repmat = T.repeat(q_glb_dim, self.story_len, 1) # batch_size * len * dim
-        #print 'q_glb_repmat', q_glb_repmat.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32')})
-        q_glb_rhp = T.reshape(q_glb_repmat, (q_glb_repmat.shape[0] * q_glb_repmat.shape[1], q_glb_repmat.shape[2]))
-        #print 'q_glb_rhp', q_glb_rhp.shape.eval({q_glb_last:np.random.rand(2,512).astype('float32')})
-        
-        init_ans = T.concatenate([self.q_q, last_mem, q_glb_rhp.dimshuffle(1,0)], axis = 0)
-        #print 'init_ans', init_ans.shape.eval({self.q_var:np.random.rand(2,5,4096).astype('float32'), self.input_var:np.random.rand(2,5,196, 512).astype('float32')})
+        init_ans = T.concatenate([self.q_q, last_mem], axis = 0) # dim x (batch x self.story_len)
 
-        #mem_ans = T.tanh(T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x')) # dim x batchsize.
-        mem_ans = T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x') # dim x batchsize
-        mem_ans_dim = mem_ans.dimshuffle('x',0,1)
-        # seq + 1 x dim x batch 
-        answer_inp = T.concatenate([mem_ans_dim, answer_inp_var_shuffled_emb], axis = 0)
-        dummy = theano.shared(np.zeros((self.dim, self.batch_size * self.story_len), dtype=floatX))
+        mem_ans = T.dot(self.W_mem_emb, init_ans) + self.b_mem_emb.dimshuffle(0,'x') # dim x (batchsize x self.story_len)
+        #mem_ans_dim = mem_ans.dimshuffle('x',0,1)
+        mem_ans_rhp = T.reshape(mem_ans.dimshuffle(1,0), (self.batch_size, self.story_len, mem_ans.shape[0]))
+        mem_ans_dim = mem_ans_rhp.dimshuffle(1,2,0)
+        answer_inp = answer_inp_var_shuffled_emb
+        #answer_inp = T.concatenate([mem_ans_dim, answer_inp_var_shuffled_emb], axis = 0) #seq + 1 x dim x (batch-size x self.story+len)
+        # Now, each answer got its input, our next step is to obtain the sequences.
+        answer_inp_shu = answer_inp.dimshuffle(2,0,1)
+        answer_inp_shu_rhp = T.reshape(answer_inp_shu, (self.batch_size, self.story_len, answer_inp_shu.shape[1],\
+                answer_inp_shu.shape[2]))
+
+        answer_inp =  answer_inp_shu_rhp.dimshuffle(1,2,3,0) # story_len x seq + 1 x dim x batch_size
+
 
         self.W_a = nn_utils.normal_param(std=0.1, shape=(self.vocab_size + 1, self.dim))
         
@@ -302,38 +250,44 @@ class DMN_batch:
         self.W_ans_hid_hid = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim))
         self.b_ans_hid = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
-        results, _ = theano.scan(fn = self.answer_gru_step,
-            sequences = answer_inp,
-            outputs_info = [ dummy ])
+        self.W_ans_map = nn_utils.normal_param(std=0.1, shape=(self.dim, self.dim * 2))
+        self.b_ans_map = nn_utils.constant_param(value=0.0, shape=(self.dim,))
 
-        #results = None
-        #r = None
-        #for i in range(self.story_len):
-        #    answer_inp_i = answer_inp[i,:]
-        #    
-        #    if i == 0:
-        #        # results: seq + 1 x dim x batch_size
-        #        r, _ = theano.scan(fn = self.answer_gru_step,
-        #            sequences = answer_inp_i,
-        #            truncate_gradient = self.truncate_gradient,
-        #            outputs_info = [ dummy ])
-        #        #print 'r', r.shape.eval({answer_inp_i:np.random.rand(23,512,2).astype('float32')})
-        #        results = r.dimshuffle('x', 0, 1,2)
-        #    else:
-        #        prev_h = r[self.answer_idx[:,i],:,T.arange(self.batch_size)]
-        #        #print 'prev_h', prev_h.shape.eval({answer_inp_i:np.random.rand(23,512,2).astype('float32'), self.answer_idx: np.asarray([[1,1,1,1,1],[2,2,2,2,2]]).astype('int32')},on_unused_input='warn' )
-        #        #print 'prev_h', prev_h.shape.eval({r:np.random.rand(23,512,2).astype('float32'), self.answer_idx: np.asarray([[1,1,1,1,1],[2,2,2,2,2]]).astype('int32')})
+        results = None
+        r = None
 
+        dummy = theano.shared(np.zeros((self.dim, self.batch_size), dtype=floatX))
+        for i in range(self.story_len):
+            answer_inp_i = answer_inp[i,:] # seq + 1 x dim x batch_size
+            mem_ans_dim_i  = mem_ans_dim[i,:] # dim x batch_size
+            if i == 0:
+                q_glb_inp = q_glb_last.dimshuffle('x', 1, 0) #1 x dim x batch_size
+                answer_inp_i = T.concatenate([q_glb_inp, answer_inp_i], axis = 0)
 
-        #        r,_ = theano.scan(fn = self.answer_gru_step,
-        #                sequences = answer_inp_i,
-        #                truncate_gradient = self.truncate_gradient,
-        #                outputs_info = [ prev_h.dimshuffle(1,0) ])
-        #        results = T.concatenate([results, r.dimshuffle('x', 0, 1, 2)])
+                init_h = T.concatenate([dummy, mem_ans_dim_i], axis = 0)
+                init_h = T.dot(self.W_ans_map, init_h) + self.b_ans_map.dimshuffle(0,'x')
+                init_h = T.tanh(init_h)
+                r, _ = theano.scan(fn = self.answer_gru_step,
+                    sequences = answer_inp_i,
+                    truncate_gradient = self.truncate_gradient,
+                    outputs_info = [ init_h])
+                r = r[1:,:] # get rid of the first glob one.
+                results = r.dimshuffle('x', 0, 1, 2)
+            else:
+                prev_h = r[self.answer_idx[:,i],:,T.arange(self.batch_size)]
+                h_ = T.concatenate([prev_h.dimshuffle(1,0), mem_ans_dim_i], axis = 0)
+                h_ = T.dot(self.W_ans_map, h_) + self.b_ans_map.dimshuffle(0,'x')
+                h_ = T.tanh(h_)
+
+                r,_ = theano.scan(fn = self.answer_gru_step,
+                        sequences = answer_inp_i,
+                        truncate_gradient = self.truncate_gradient,
+                        outputs_info = [ h_ ])
+                results = T.concatenate([results, r.dimshuffle('x', 0, 1, 2)])
         ## results: story_len x seq+1 x dim x batch_size
-        #results = results.dimshuffle(3,0,1,2)
-        #results = T.reshape(results, (self.batch_size * self.story_len, results.shape[2], results.shape[3]))
-        #results = results.dimshuffle(1,2,0) # seq_len x dim x (batch x seq)
+        results = results.dimshuffle(3,0,1,2)
+        results = T.reshape(results, (self.batch_size * self.story_len, results.shape[2], results.shape[3]))
+        results = results.dimshuffle(1,2,0) # seq_len x dim x (batch x seq)
 
         # Assume there is a start token 
         #print 'results', results.shape.eval({self.input_var: np.random.rand(2,5,196,512).astype('float32'),
@@ -355,8 +309,10 @@ class DMN_batch:
         #    self.answer_inp_var: np.random.rand(5, 18, 8001).astype('float32')})
 
 
-        preds = prob[1:,:,:]
-        prob = prob[1:-1,:,:]
+        #preds = prob[1:,:,:]
+        #prob = prob[1:-1,:,:]
+        preds = prob
+        prob = prob[:-1,:,:]
 
         prob_shuffled = prob.dimshuffle(2,0,1) # b * len * vocab
         preds_shuffled = preds.dimshuffle(2,0,1)
@@ -387,7 +343,7 @@ class DMN_batch:
 
         self.params = [self.W_inp_emb_in, self.b_inp_emb_in, 
                 self.W_q_emb_in, self.b_q_emb_in,
-                self.W_glb_att_1, self.W_glb_att_2, self.b_glb_att_1, self.b_glb_att_2,
+                #self.W_glb_att_1, self.W_glb_att_2, self.b_glb_att_1, self.b_glb_att_2,
                 self.W_qf_res_in, self.W_qf_res_hid, self.b_qf_res,
                 self.W_qf_upd_in, self.W_qf_upd_hid, self.b_qf_upd,
                 self.W_qf_hid_in, self.W_qf_hid_hid, self.b_qf_hid,
@@ -400,6 +356,7 @@ class DMN_batch:
                 self.W_ans_res_in, self.W_ans_res_hid, self.b_ans_res, 
                 self.W_ans_upd_in, self.W_ans_upd_hid, self.b_ans_upd,
                 self.W_ans_hid_in, self.W_ans_hid_hid, self.b_ans_hid,
+                self.W_ans_map, self.b_ans_map,
                 ]
         self.params += self.W_mem_update
         self.params += self.b_mem_update
@@ -425,34 +382,23 @@ class DMN_batch:
             self.loss_l2 = 0
         
         self.loss = self.loss_ce + self.loss_l2
-        self.baseline_time = theano.shared(np.float32(0.), name='baseline_time')
-        alpha_entropy_c = theano.shared(np.float32(self.alpha_entropy_c), name='alpha_entropy_c')
-        #mean_r = ( mask * reward_prob).sum() / mask.sum() # or just fixed it as 1.
-        #mean_r = 1
-        mean_r = (self.answer_mask * reward_prob).sum(1) / self.answer_mask.sum(1) # or just fixed it as 1.
-        mean_r = mean_r[0,None]
         grads = T.grad(self.loss, wrt=self.params,
-                     disconnected_inputs='raise',
-                     known_grads={att_alpha_a:(mean_r - self.baseline_time)*
-                     (att_alpha_sample/(att_alpha_a + 1e-10)) + alpha_entropy_c*(T.log(att_alpha_a + 1e-10) + 1)})
+                     disconnected_inputs='raise')
 
-            
         updates = lasagne.updates.adadelta(grads, self.params, learning_rate = self.learning_rate)
-        updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r.mean()
-        #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
             logging.info("compiling train_fn")
-            self.train_fn = theano.function(inputs=[self.input_var, self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var], 
+            self.train_fn = theano.function(inputs=[self.input_var, self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var, self.answer_idx], 
                                             outputs=[self.prediction, self.loss],
                                             updates=updates)
         
         logging.info("compiling test_fn")
-        self.test_fn = theano.function(inputs=[self.input_var, self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var],
+        self.test_fn = theano.function(inputs=[self.input_var, self.q_var, self.answer_var, self.answer_mask, self.answer_inp_var, self.answer_idx],
                                        outputs=[self.prediction, self.loss])
         
         logging.info("compiling pred_fn")
-        self.pred_fn= theano.function(inputs=[self.input_var, self.q_var, self.answer_inp_var],
+        self.pred_fn= theano.function(inputs=[self.input_var, self.q_var, self.answer_inp_var, self.answer_idx],
                                        outputs=[self.pred])
     
     def GRU_update(self, h, x, W_res_in, W_res_hid, b_res,
@@ -575,7 +521,6 @@ class DMN_batch:
                 obj = {
                     'params' : [x.get_value() for x in self.params],
                     'epoch' : epoch, 
-                    'baseline': self.baseline_time,
                     'gradient_value': (kwargs['gradient_value'] if 'gradient_value' in kwargs else 0)
                 },
                 file = save_file,
@@ -871,7 +816,7 @@ class DMN_batch:
         
         inp, q, ans, ans_inp, ans_mask, ans_idx, img_ids = self._process_batch_sind(batch_index, mode)
         
-        ret = theano_fn(inp, q, ans, ans_mask, ans_inp)
+        ret = theano_fn(inp, q, ans, ans_mask, ans_inp, ans_idx)
         param_norm = np.max([utils.get_norm(x.get_value()) for x in self.params])
         
         return {"prediction": ret[0],

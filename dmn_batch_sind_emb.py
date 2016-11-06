@@ -57,11 +57,14 @@ class DMN_batch:
 
         self.train_story = None
         self.test_story = None
+        self.val_story = None
         self.train_dict_story, self.train_features, self.train_fns_dict, self.train_num_imgs = self._process_input_sind(self.data_dir, 'train')
-        self.test_dict_story, self.test_features, self.test_fns_dict, self.test_num_imgs = self._process_input_sind(self.data_dir, 'val')
+        self.test_dict_story, self.test_features, self.test_fns_dict, self.test_num_imgs = self._process_input_sind(self.data_dir, 'test')
+        self.val_dict_story, self.val_features, self.val_fns_dict, self.val_num_imgs = self._process_input_sind(self.data_dir, 'val')
 
         self.train_story = self.train_dict_story.keys()
         self.test_story = self.test_dict_story.keys()
+        self.val_story = self.val_dict_story.keys()
         self.vocab_size = len(self.vocab)
         
         self.input_var = T.tensor3('input_var') # (batch_size, seq_len, cnn_dim)
@@ -397,16 +400,19 @@ class DMN_batch:
             split_dict_story = self.train_dict_story
             features = self.train_features
             fns_dict = self.train_fns_dict
-            
-        else:
+        if split == 'test':
             split_story = self.test_story
             split_dict_story = self.test_dict_story
             features = self.test_features
             fns_dict = self.test_fns_dict
+        else:
+            split_story = self.val_story
+            split_dict_story = self.val_dict_story
+            features = self.val_features
+            fns_dict = self.val_fns_dict
 
-        # make sure it's small than the number of stories.
+        
         start_index = start_index % len(split_story)
-        # make sure there is enough for a batch.
         start_index = min(start_index, len(split_story) - self.batch_size)
         # Now, we select the stories.
         stories = split_story[start_index:start_index+self.batch_size]
@@ -447,7 +453,7 @@ class DMN_batch:
                 if s_slid_idx != slid:
                     img_id = s_slid[1][0]
                     inp.append(features[fns_dict[img_id]])
-            img_ids.append(img_id)
+            img_ids.append(str(sid) + '_' + str(img_id))
             inp = np.stack(inp, axis = 0)
             #print inp.shape
             inputs.append(inp)
@@ -481,7 +487,114 @@ class DMN_batch:
         #        if answers[i][j] in self.ivocab:
         #            print self.ivocab[answers[i][j]].encode('utf8'),
         #    print
-        #pdb.set_trace()
+
+
+        #print 'inputs', inputs.shape
+        #print 'questions', questions.shape
+        #print 'answers',answers.shape
+        #print 'answers_inp', answers_inp.shape
+        #print 'answers_mask',answers_mask.shape
+        return inputs, questions, answers, answers_inp, answers_mask, img_ids
+ 
+    def _process_batch_sind_test(self, batch_index, split = 'test'):
+        # Now, randomly select one story.
+        story_len = 5 
+        start_index = self.batch_size / story_len * batch_index
+
+        split_story = None
+        if split == 'train':
+            split_story = self.train_story
+            split_dict_story = self.train_dict_story
+            features = self.train_features
+            fns_dict = self.train_fns_dict
+        if split == 'test':
+            split_story = self.test_story
+            split_dict_story = self.test_dict_story
+            features = self.test_features
+            fns_dict = self.test_fns_dict
+        else:
+            split_story = self.val_story
+            split_dict_story = self.val_dict_story
+            features = self.val_features
+            fns_dict = self.val_fns_dict
+        
+        start_index = start_index % len(split_story)
+        # make sure there is enough for a batch.
+        start_index = min(start_index, len(split_story) - self.batch_size / story_len)
+        # Now, we select the stories.
+        stories = split_story[start_index:start_index+self.batch_size/story_len]
+        # For each story, we randomly select one as the question and the remaining as the facts.
+        slids = []
+        for sid in stories:
+            slids += range(len(split_dict_story[sid]))
+        stories = [ s for s in stories for i in range(len(split_dict_story[s]))]
+        max_inp_len = 0
+        max_q_len = 1 # just be 1.
+        max_ans_len = 0
+        for slid, sid in zip(slids, stories):
+            max_inp_len = max(max_inp_len, len(split_dict_story[sid])-1)
+            #max_q_len = max(max_q_len, split_dict_story[sid][slid][1])
+            max_ans_len = max(max_ans_len, len(split_dict_story[sid][slid][1][2]))
+        
+        max_ans_len += 1 # this is for the start token.
+        # in our case, it is pretty similar to the word-level dmn,
+
+        questions = []
+        inputs = []
+        answers = []
+        answers_inp = []
+        answers_mask = []
+        img_ids = []
+
+        for slid, sid in zip(slids,stories):
+            anno = split_dict_story[sid]
+            input_anno = anno[slid]
+            img_id = input_anno[1][0]
+            
+            # Now, find the input visual features.
+            questions.append( features[fns_dict[img_id]] )
+
+            img_ids.append(str(sid) + '_' + str(img_id))
+            # Now, it is the inputs, we can use the other images other than current one.
+            inp = []
+            for s_slid_idx,s_slid in enumerate(anno):
+                if s_slid_idx != slid:
+                    img_id = s_slid[1][0]
+                    inp.append(features[fns_dict[img_id]])
+            #`print img_id
+            inp = np.stack(inp, axis = 0)
+            #print inp.shape
+            inputs.append(inp)
+            answer = []
+            answer.append(self.vocab_size)
+            answer.extend(input_anno[1][2]) # this is the index for the captions.
+            answer_inp = np.zeros((max_ans_len, self.vocab_size + 1), dtype = floatX)
+            answer_mask = []
+            for ans_idx, w_idx in enumerate(answer):
+                answer_inp[ans_idx, w_idx] = 1
+            answer_mask = [ 1 for i in range(len(answer) -1) ]
+            while len(answer) < max_ans_len: # this does not matter.
+                answer.append( -1 )
+                answer_mask.append(0)
+            answer = answer[1:]
+            answers.append(answer)
+            answers_mask.append(answer_mask)
+            answers_inp.append(answer_inp)
+        # Finally, we transform them into numpy array.
+        inputs = np.stack(inputs, axis = 0)
+        inputs = np.array(inputs).astype(floatX)
+        #questions = np.array(questions).astype(floatX)
+        questions = np.stack(questions, axis = 0)
+        questions = np.array(questions).astype(floatX)
+        answers = np.array(answers).astype(np.int32)
+        answers_mask = np.array(answers_mask).astype(floatX)
+        #print answers_mask
+        answers_inp = np.stack(answers_inp, axis = 0)
+        #for i in range(answers.shape[0]):
+        #    for j in range(answers.shape[1]):
+        #        if answers[i][j] in self.ivocab:
+        #            print self.ivocab[answers[i][j]].encode('utf8'),
+        #    print
 
 
         #print 'inputs', inputs.shape
@@ -686,14 +799,14 @@ class DMN_batch:
                 "log": "pn: %.3f" % param_norm,
                 }
 
-    def step_beam(self, batch_index, beam_size = 10):
+    def step_beam(self, batch_index, mode, beam_size = 4):
         '''
             This function is mainly for the testing stage.
             Use the beam search to generate the target captions from each image.
         '''
 
         theano_fn = self.pred_fn
-        inp, q, ans, ans_inp, ans_mask, img_ids = self._process_batch_sind(batch_index)
+        inp, q, ans, ans_inp, ans_mask, img_ids = self._process_batch_sind_test(batch_index, mode)
         
         batch_size = inp.shape[0]
 
@@ -703,7 +816,7 @@ class DMN_batch:
         nsteps = 0
 
         while True:
-            logging.info('nsteps = %d', nsteps)
+            #logging.info('nsteps = %d', nsteps)
             beam_c = [[] for i in range(batch_size) ]
             idx_prevs = [ [] for i in range(batch_size)]
             idx_of_idx = [[] for i in range(batch_size)]
