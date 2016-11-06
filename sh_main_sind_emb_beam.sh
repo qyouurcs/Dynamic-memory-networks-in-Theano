@@ -8,4 +8,4 @@ fi
 gpuid=$1
 
 #THEANO_FLAGS="floatX=float32,device=gpu$gpuid,optimizer=fast_compile" python main_sind_emb.py --load_state ./states_emb/dmn_batch_sind.mh5.n512.bs100.epoch100.test3.79743.state --mode test_beam --batch_size 10
-THEANO_FLAGS="floatX=float32,device=gpu$gpuid" python main_sind_emb.py --load_state ./states_emb/dmn_batch_sind.mh5.n512.bs100.epoch28.test4.13854.state --mode test_beam --batch_size 10
+THEANO_FLAGS="floatX=float32,device=gpu$gpuid" python main_sind_emb.py --load_state states_emb_1e-5/dmn_batch_sind.mh5.n512.bs100.epoch170.test4.95908.state --mode test_beam --batch_size 10
