@@ -535,7 +535,6 @@ class DMN_batch:
             loaded_params = dict['params']
             for (x, y) in zip(self.params, loaded_params):
                 x.set_value(y)
-            self.baseline_time = dict['baseline']
 
     def _process_batch_sind(self, batch_index, split = 'train'):
         # Now, randomly select one story.
