@@ -4,19 +4,26 @@ import numpy as np
 import nn_utils
 
 
+i = T.iscalar('i')
 x = T.tensor3('x')
 
-y = x[::-1,:,:]
+y = theano.ifelse.ifelse(T.le(i,0), x[::-1,:,:],x)
 
-f = theano.function(inputs = [x], outputs = y)
+f = theano.function(inputs = [i, x], outputs = y)
 
 a = np.random.rand(2,3,2).astype('float32')
 
-b = f(a)
+b = f(0,a)
 
 print a[:,:,0]
 print '\n'
 print b[:,:,0]
+b = f(1,a)
+
+print a[:,:,0]
+print '\n'
+print b[:,:,0]
+
 #e_x = T.fvector('e_x')
 #
 #e_x2 = T.set_subtensor(e_x[0],0)

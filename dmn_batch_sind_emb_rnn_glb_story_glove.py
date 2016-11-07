@@ -90,6 +90,9 @@ class DMN_batch:
         self.answer_mask = T.matrix('answer_mask')
         self.answer_idx = T.imatrix('answer_idx') # batch x seq
         self.answer_inp_var = T.tensor3('answer_inp_var') # answer of example in minibatch
+
+        self.init_h = T.matrix('init_h') # This is only used for the prediction function.
+        self.story_idx = T.iscalar('story_idx')
         
         print "==> building input module"
         # It's very simple now, the input module just need to map from cnn_dim to dim.
@@ -305,43 +308,42 @@ class DMN_batch:
                         outputs_info = [ h_ ])
                 results = T.concatenate([results, r.dimshuffle('x', 0, 1, 2)])
         ## results: story_len x seq+1 x dim x batch_size
+        #########################################################################################
+        # This is for the beam search.
+        #########################################################################################
+        beam_answer_inp = answer_inp[self.story_idx,:]
+        beam_mem_ans_dim = mem_ans_dim[self.story_idx,:]
+        beam_q_glb_inp = q_glb_last.dimshuffle('x', 1, 0)
+        beam_anp_seq = theano.ifelse.ifelse( T.le(self.story_idx, 0), \
+                T.concatenate([q_glb_inp, beam_answer_inp], axis = 0),\
+                beam_answer_inp)
+        beam_init_h = T.concatenate([ self.init_h, beam_mem_ans_dim], axis = 0) 
+        beam_init_h = T.dot(self.W_ans_map, beam_init_h) + self.b_ans_map.dimshuffle(0, 'x')
+        beam_init_h = T.tanh(beam_init_h)
+        beam_r,_ = theano.scan(fn = self.answer_gru_step,
+                sequences = beam_anp_seq,
+                truncate_gradient = self.truncate_gradient,
+                outputs_info = [ beam_init_h ]
+
+        # Now, beam_r: seq+1 x dim x batch_size
+        beam_prob,_ = theano.scan(fn = lambda x: w: T.dot(w, x), sequences = beam_r, non_sequences = self.W_a)
+        beam_preds = beam_prob.dimshuffle(2,0,1) # b * len * vocab
+        beam_preds_rhp =  T.reshape(beam_preds, (beam_preds.shape[0] * beam_preds.shape[1], beam_preds.shape[2]))
+        beam_preds_rhp_sm = nn_utils.softmax(beam_preds_rhp)
+        self.beam_pred = T.reshape(beam_preds_rhp_sm, (beam_preds_rhp_sm.shape[0], beam_preds_rhp_sm.shape[1], beam_preds_rhp_sm.shape[2]))
+
+        ###########################################################################################################
+
         results = results.dimshuffle(3,0,1,2)
         results = T.reshape(results, (self.batch_size * self.story_len, results.shape[2], results.shape[3]))
         results = results.dimshuffle(1,2,0) # seq_len x dim x (batch x seq)
 
-        # Assume there is a start token 
-        #print 'results', results.shape.eval({self.input_var: np.random.rand(2,5,196,512).astype('float32'),
-        #    self.q_var: np.random.rand(2,5, 4096).astype('float32'), 
-        #    self.answer_idx: np.asarray([[1,1,1,1,1],[2,2,2,2,2]]).astype('int32'),
-        #    self.answer_inp_var: np.random.rand(5, 18, 8001).astype('float32')})
-
-        #results = results[1:-1,:,:] # get rid of the last token as well as the first one (image)
-        #print results.shape.eval({self.input_var: np.random.rand(3,4,4096).astype('float32'),
-        #    self.q_var: np.random.rand(3, 4096).astype('float32'), 
-        #    self.answer_inp_var: np.random.rand(3, 18, 8001).astype('float32')}, on_unused_input='ignore')
-            
-        # Now, we need to transform it to the probabilities.
-
         prob,_ = theano.scan(fn = lambda x, w: T.dot(w, x), sequences = results, non_sequences = self.W_a )
-        #print 'prob', prob.shape.eval({self.input_var: np.random.rand(2,5,196,512).astype('float32'),
-        #    self.q_var: np.random.rand(2,5, 4096).astype('float32'), 
-        #    self.answer_idx: np.asarray([[1,1,1,1,1],[2,2,2,2,2]]).astype('int32'),
-        #    self.answer_inp_var: np.random.rand(5, 18, 8001).astype('float32')})
-
-
-        #preds = prob[1:,:,:]
-        #prob = prob[1:-1,:,:]
         preds = prob
         prob = prob[:-1,:,:]
 
         prob_shuffled = prob.dimshuffle(2,0,1) # b * len * vocab
         preds_shuffled = preds.dimshuffle(2,0,1)
-
-
-        logging.info("prob shape.")
-        #print prob.shape.eval({self.input_var: np.random.rand(3,4,4096).astype('float32'),
-        #    self.q_var: np.random.rand(3, 4096).astype('float32'), 
-        #    self.answer_inp_var: np.random.rand(3, 18, 8001).astype('float32')})
 
         n = prob_shuffled.shape[0] * prob_shuffled.shape[1]
         n_preds = preds_shuffled.shape[0] * preds_shuffled.shape[1]
@@ -353,9 +355,6 @@ class DMN_batch:
         preds_sm = nn_utils.softmax_(preds_rhp)
         self.prediction = prob_sm # this one is for the training.
 
-        #print 'prob_sm', prob_sm.shape.eval({prob: np.random.rand(19,8897,3).astype('float32')})
-        #print 'lbl', loss_vec.shape.eval({prob: np.random.rand(19,8897,3).astype('float32')})
-        # This one is for the beamsearch.
         self.pred = T.reshape(preds_sm, (preds_shuffled.shape[0], preds_shuffled.shape[1], preds_shuffled.shape[2]))
 
         mask =  T.reshape(self.answer_mask, (n,))
@@ -386,16 +385,9 @@ class DMN_batch:
         print "==> building loss layer and computing updates"
         reward_prob = prob_sm[T.arange(n), lbl]
         reward_prob = T.reshape(reward_prob, (prob_shuffled.shape[0], prob_shuffled.shape[1]))
-        #reward_prob = printing.Print('mean_r')(reward_prob)
 
         loss_vec = T.nnet.categorical_crossentropy(prob_sm, lbl)
-        #loss_vec = T.nnet.categorical_crossentropy(prob_sm, T.flatten(self.answer_var))
-        #print 'loss_vec', loss_vec.shape.eval({prob_sm: np.random.rand(39,8900).astype('float32'),
-        #    lbl: np.random.rand(39,).astype('int32')})
-
         self.loss_ce = (mask * loss_vec ).sum() / mask.sum() 
-        print 'loss_ce', self.loss_ce.eval({prob_sm: np.random.rand(39,8900).astype('float32'),
-            lbl: np.random.rand(39,).astype('int32'), mask: np.random.rand(39,).astype('float32')})
 
         if self.l2 > 0:
             self.loss_l2 = self.l2 * nn_utils.l2_reg(self.params)
@@ -405,8 +397,6 @@ class DMN_batch:
         self.loss = self.loss_ce + self.loss_l2
         self.baseline_time = theano.shared(np.float32(0.), name='baseline_time')
         alpha_entropy_c = theano.shared(np.float32(self.alpha_entropy_c), name='alpha_entropy_c')
-        #mean_r = ( mask * reward_prob).sum() / mask.sum() # or just fixed it as 1.
-        #mean_r = 1
         mean_r = (self.answer_mask * reward_prob).sum(1) / self.answer_mask.sum(1) # or just fixed it as 1.
         mean_r = mean_r[0,None]
         grads = T.grad(self.loss, wrt=self.params,
@@ -417,7 +407,6 @@ class DMN_batch:
             
         updates = lasagne.updates.adadelta(grads, self.params, learning_rate = self.learning_rate)
         updates[self.baseline_time] =  self.baseline_time * 0.9 + 0.1 * mean_r.mean()
-        #updates = lasagne.updates.momentum(self.loss, self.params, learning_rate=0.001)
         
         if self.mode == 'train':
             logging.info("compiling train_fn")
@@ -433,6 +422,10 @@ class DMN_batch:
         self.pred_fn= theano.function(inputs=[self.input_var, self.q_var, self.answer_inp_var, self.answer_idx],
                                        outputs=[self.pred])
     
+        logging.info("compiling beam pred_fn")
+        self.beam_pred_fn= theano.function(inputs=[self.input_var, self.q_var, self.answer_inp_var, self.init_h, self.story_idx],
+                                       outputs=[self.beam_pred, beam_r])
+
     def GRU_update(self, h, x, W_res_in, W_res_hid, b_res,
                          W_upd_in, W_upd_hid, b_upd,
                          W_hid_in, W_hid_hid, b_hid):
@@ -876,114 +869,151 @@ class DMN_batch:
             Use the beam search to generate the target captions from each image.
         '''
 
-        theano_fn = self.pred_fn
-        q, ans, ans_inp, ans_mask, img_ids = self._process_batch_sind(batch_index, 'test')
+        theano_fn = self.beam_pred_fn
+        #q, ans, ans_inp, ans_mask, img_ids = self._process_batch_sind(batch_index, 'test')
+        inp, q, ans, ans_inp, ans_mask, ans_idx, img_ids = self._process_batch_sind(batch_index, 'test')
         
-        batch_size = self.batch_size
         q_shape = q.shape[0]
         if q_shape < batch_size:
             q_ = np.zeros((self.batch_size, self.story_len, q.shape[2]), dtype = 'float32')
+            inp_ = np.zeros((self.batch_size, self.story_len, self.patches, self.cnn_dim), dtype = 'float32')
+            ans_idx_ = np.zeros((self.batch_size, ans_idx.shape[1]), dtype = 'float32')
             q_[0:q_shape,:,:] = q
+            inp_[0:q_shape,:,:,:] = inp
+            ans_idx_[0:q_shape,:] = ans_idx
+
             q_[q_shape:,:,:] = q[0,:,:]
+            inp_[q_shape:,:,:,:] = inp[0,:,:,:]
+            ans_idx_[q_shape:,:] = ans_idx[0,:]
             q = q_
+            inp = inp_
+            ans_idx = ans_idx_
 
+        batch_size = self.batch_size
+        init_h = None
+        beam_r = []
         captions = []
-        batch_of_beams = [ [ [ (0.0, [self.vocab_size])] for j in range(self.story_len)] for i in range(batch_size) ]
+        batch_of_beams = [ (0.0, [])  for i in range(batch_size) ]
 
-        nsteps = 0
+        for story_idx in range(self.story_len):
+            if story_idx == 0:
+                init_h = np.zeros((self.dim, self.batch_size), dtype = 'float32')
+            else:
+                # we need to obtain init_h from beam_r.
+                # prev_h = r[self.answer_idx[:,i],:,T.arange(self.batch_size)]
+                init_h = beam_r
+            
+            for bbeam in batch_of_beams:
+                bbeam[1].append(self.vocab_size)
+            pdb.set_trace()
+            #batch_of_beams = [ (0.0, [self.vocab_size])  for i in range(batch_size) ]
+            nsteps = 0
 
-        while True:
-            #logging.info('nsteps = %d', nsteps)
-            beam_c = [[[] for j in range(self.story_len)] for i in range(batch_size) ]
-            idx_prevs = [ [ [] for j in range(self.story_len)] for i in range(batch_size)]
-            idx_of_idx = [[ [] for j in range(self.story_len)] for i in range(batch_size)]
-            idx_of_idx_len = [ [[] for j in range(self.story_len)] for i in range( batch_size)]
+            while True:
+                #logging.info('nsteps = %d', nsteps)
+                beam_c = [[] for i in range(batch_size) ]
+                idx_prevs = [ [] for i in range(batch_size)]
+                idx_of_idx = [ [] for i in range(batch_size)]
+                idx_of_idx_len = []
 
-            max_b = -1
-            max_story = 0
-            max_num_beam = 0
-
-            is_done = True
-            #pdb.set_trace()
-            for i in range(batch_size):
-                for j in range(self.story_len):
-                    beams = batch_of_beams[i][j]
+                max_b = -1
+                cnt_ins = 0
+                for i in range(batch_size):
+                    beams = batch_of_beams[i]
                     for k, b in enumerate(beams):
                         idx_prev = b[-1]
                         if idx_prev[-1] == self.vocab['.']:
                             # This is the end.
-                            beam_c[i][j].append(b)
+                            beam_c[i].append(b)
                             continue
 
-                        idx_prevs[i][j].append( idx_prev )
-                        idx_of_idx[i][j].append(k)
-                        idx_of_idx_len[i][j].append( len(idx_prev))
-                        #cnt_ins += 1
-                        is_done = False
+                        idx_prevs[i].append( idx_prev )
+                        idx_of_idx[i].append(k)
+                        idx_of_idx_len.append( len(idx_prev))
+                        cnt_ins += 1
 
                         if len(idx_prev) > max_b:
                             max_b = len(idx_prev)
-                    max_num_beam = max( len(idx_prevs[i][j]), max_num_beam)
 
-            if is_done:
-                break
-            # Now, we need to manually make them aligned. 
-            # In all cases, we should fix the q_i, which is all the stories of the current batch.
+                if cnt_ins == 0:
+                    break
+                
+                x_i = np.zeros((cnt_ins, max_b, self.word_vector_size), dtype = 'float32')
+                v_i = np.zeros((cnt_ins, inp.shape[1], self.cnn_dim), dtype = 'float32')
+                q_i = np.zeros((cnt_ins, self.cnn_dim), dtype='float32')
 
-            x_i = np.zeros((batch_size, max_b, self.vocab_size + 1), dtype = 'float32')
-            #q_i = np.zeros((batch_size, self.story_len, self.cnn_dim), dtype='float32')
-            num_beam_cnt = [ [ 0 for j in range(self.story_len) ] for i in range(batch_size)]
-            for i in range(batch_size):
-                for j in range(self.story_len):
-                    num_beam_cnt[i][j] = len(idx_prevs[i][j])
-                    while len(idx_prevs[i][j]) < max_num_beam:
-                        idx_prevs[i][j].append(  [self.vocab_size])
-                        idx_of_idx[i][j].append( len( idx_of_idx[i][j]))
-                        idx_of_idx_len[i][j].append(1)
+                idx_base = 0
+                for j,idx_prev_j in enumerate(idx_prevs):
+                    for m, idx_prev in enumerate(idx_prev_j):
+                        for k in range(len(idx_prev)):
+                            if idx_prev[k] ==self.vocab_size:
+                                x_i[m + idx_base,k,:] = utils.process_word2( word = "#START#",
+                                                                  word2vec = self.word2vec,
+                                                                  vocab = self.vocab,
+                                                                  word_vector_size = self.word_vector_size,
+                                                                  to_return = 'word2vec' )
+                            else:
+                                x_i[m + idx_base,k,:] = utils.process_word2( word = self.ivocab[idx_prev[k]],
+                                                                        word2vec = self.word2vec,
+                                                                        vocab = self.vocab,
+                                                                        word_vector_size = self.word_vector_size,
+                                                                        to_return = 'word2vec' )
 
-            pred = np.zeros((max_num_beam, self.batch_size * self.story_len, self.vocab_size + 1), dtype = 'float32')
-            for i in range(max_num_beam):
-                x_i = np.zeros((batch_size, self.story_len, max_b, self.vocab_size + 1), dtype = 'float32')
-                for j in range(batch_size):
-                    for k in range(self.story_len):
-                        idx_prev = idx_prevs[j][k][i]
-                        for m in range(len(idx_prev)):
-                            x_i[j,k, m,idx_prev[m]] = 1.0
-                x_i = np.reshape(x_i, (x_i.shape[0] * x_i.shape[1], x_i.shape[2], x_i.shape[3]))
-                t = theano_fn(q, x_i)[0]
-                for j in range(t.shape[0]):
-                    pred[i,j,:] = t[j, idx_of_idx_len[j / self.story_len][j % self.story_len][i] - 1,:]
+                    q_i[idx_base:idx_base + len(idx_prev_j),:] = q[j,story_idx,:]
+                    v_i[idx_base:idx_base + len(idx_prev_j),:,:] = inp[j,story_idx,:,:]
+                    idx_base += len(idx_prev_j)
 
-            #pdb.set_trace()
-            for i in range(max_num_beam):
-                l = np.log( 1e-20 + pred[i,:])
+                # This is really pain full.
+                # Since the batch_size is fixed when creating the module. Thus,
+                # we need to make them equal to the batch_size.
+                pred = np.zeros((cnn_ins, max_b, self.vocab_size + 1), dtype = 'float32')
+                for i in range(0, v_i.shape[0], batch_size):
+                    start_idx = i
+                    end_idx = i + batch_size
+                    if end_idx > v_i.shape[0]:
+                        end_idx = v_i.shape[0]
+                        start_idx = max(end_idx - batch_size,0)
+
+                    if end_idx - start_idx < batch_size:
+                        t_q_i = np.zeros((batch_size, self.cnn_dim), dtype = 'float32')
+                        t_x_i = np.zeros((batch_size, max_b, self.vocab_size + 1), dtype = 'float32')
+                        t_v_i = np.zeros((batch_size, inp.shape[1], self.cnn_dim), dtype = 'float32')
+
+                        t_q_i[0:(end_idx - start_idx),:] = q_i[start_idx:end_idx,:]
+                        t_x_i[0:(end_idx - start_idx),:,:] = x_i[start_idx:end_idx,:,:]
+                        t_v_i[0:(end_idx - start_idx),:,:] = v_i[start_idx:end_idx,:,:]
+                        t,beam_r = theano_fn(t_v_i, t_q_i, t_x_i, init_h, story_idx)
+                        pred[start_idx:end_idx,:,:] = t[0][0:(end_idx-start_idx),:,:]
+                    else:
+                        t,beam_r = theano_fn(v_i[start_idx:end_idx,:,:], q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:,:])
+                        pred[start_idx:end_idx,:,:] = t[0]
+
+                p = np.zeros((pred.shape[0], pred.shape[2]))
+                for i in range(pred.shape[0]):
+                    p[i,:] = pred[i,idx_of_idx_len[i]-1,:]
+
+                l = np.log( 1e-20 + p)
                 top_indices = np.argsort( -l, axis=-1)
-                l =  np.reshape(l, (batch_size, self.story_len, self.vocab_size + 1))
-                top_indices = np.reshape(top_indices, (batch_size, self.story_len, self.vocab_size+1))
-
-                for j in range(batch_size):
-                    for k in range(self.story_len):
-                        if num_beam_cnt[j][k] < i + 1:
-                            continue
+                idx_base = 0
+                for batch_i, idx_i in enumerate(idx_of_idx):
+                    for j,idx in enumerate(idx_i):
+                        row_idx = idx_base + j
                         for m in range(beam_size):
-                            wordix = top_indices[j][k][m]
-                            beam_c[j][k].append((batch_of_beams[j][k][idx_of_idx[j][k][i]][0] + l[j][k][wordix], \
-                                batch_of_beams[j][k][idx_of_idx[j][k][i]][1] + [wordix]))
-            for j in range(batch_size):
-                for k in range(self.story_len):
-                    c = beam_c[j][k][0:beam_size * beam_size]
-                    #print i,j,len(c)
-                    c.sort(reverse = True)
-                    batch_of_beams[j][k] = c[0:beam_size]
+                            wordix = top_indices[row_idx][m]
+                            beam_c[batch_i].append((batch_of_beams[batch_i][idx][0] + l[row_idx][wordix], batch_of_beams[batch_i][idx][1] + [wordix]))
+                    idx_base += len(idx_i)
 
-            nsteps += 1
-            if nsteps >= 20:
-                break
-            
-        for j in range(batch_size):
-            for k in range( self.story_len):
-                pred = [ (b[0], b[1]) for b in batch_of_beams[j][k] ]
-                captions.append(pred)
+                for i in range(len(beam_c)):
+                    beam_c[i].sort(reverse = True) # descreasing order.
+                for i, b in enumerate(beam_c):
+                    batch_of_beams[i] = beam_c[i][:beam_size]
+                nsteps += 1
+                if nsteps >= 20:
+                    break
+
+        for beams in batch_of_beams:
+            pred = [(b[0], b[1]) for b in beams ]
+            captions.append(pred)
 
         return {'captions':captions,
                 'img_ids': img_ids}
