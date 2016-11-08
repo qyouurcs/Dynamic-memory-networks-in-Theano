@@ -567,6 +567,7 @@ class DMN_batch:
                 x.set_value(y)
             self.baseline_time = dict['baseline']
 
+        self.word2vec = dict['word2vec']
     def _process_batch_sind(self, batch_index, split = 'train'):
         # Now, randomly select one story.
         start_index = self.batch_size * batch_index
