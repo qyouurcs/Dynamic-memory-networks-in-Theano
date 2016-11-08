@@ -1045,7 +1045,7 @@ class DMN_batch:
                     
                     #batch_of_beams[i] = beam_c[i][:beam_size]
                 nsteps += 1
-                if nsteps >= 10:
+                if nsteps >= 15:
                     break
             
         for beams in batch_of_beams:
