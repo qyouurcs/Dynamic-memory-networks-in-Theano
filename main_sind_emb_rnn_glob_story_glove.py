@@ -140,6 +140,39 @@ def do_epoch(mode, epoch, skipped=0):
     
     return avg_loss, skipped
 
+def do_epoch_beam(epoch, skipped=0):
+    # mode is 'train' or 'test'
+    batches_per_epoch = dmn.get_batches_per_epoch('test')
+    
+    all_candidates = [] 
+    result_list = []
+    json_fn = os.path.join(args.save_dir, os.path.basename(args.load_state)  + '.json')
+    for i in range(0, batches_per_epoch):
+        logging.info('i = %d, batches = %d', i, batches_per_epoch)
+    #for i in range(0, 2):
+        step_data = dmn.step_beam(i)
+    
+        for caption,img_id in zip(step_data['captions'], step_data['img_ids']):
+            top_prediction = caption[0]
+            # ix 0 is the END token, skip that
+            candidate = ' '.join([ dmn.ivocab[ix] for ix in top_prediction[1] if ix < len(dmn.vocab) ])
+            #candidates = candidate.split('.')
+            #candidate = '.'.join(candidates[0:-1])
+
+            #logging.info('loss: %f', top_prediction[0])
+            #logging.info('candidate: %s', candidate)
+            all_candidates.append(candidate)
+            cur_img = {}
+            cur_img['image_id'] = img_id
+            cur_img['caption'] = candidate
+            result_list.append(cur_img)
+            #pdb.set_trace()
+            # We need to calculate the BLEU score, thus we need to format the datas
+            # the way did in neural talk, which has the perl codes for this.
+
+    with open(json_fn, 'w') as json_fid:
+        json.dump(result_list, json_fid)
+
 
 if args.mode == 'train':
     print "==> training"   	
@@ -170,6 +203,16 @@ elif args.mode == 'test':
     data["vocab"] = dmn.vocab.keys()
     json.dump(data, file, indent=2)
     do_epoch('test', 0)
+
+elif args.mode == 'test_beam':
+    file = open('last_tested_model.json', 'w+')
+    data = dict(args._get_kwargs())
+    data["id"] = network_name
+    data["name"] = network_name
+    data["description"] = ""
+    data["vocab"] = dmn.vocab.keys()
+    json.dump(data, file, indent=2)
+    do_epoch_beam('test', 0)
 
 else:
     raise Exception("unknown mode")
