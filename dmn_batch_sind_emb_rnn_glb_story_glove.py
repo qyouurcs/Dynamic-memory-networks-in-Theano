@@ -323,14 +323,17 @@ class DMN_batch:
         beam_r,_ = theano.scan(fn = self.answer_gru_step,
                 sequences = beam_anp_seq,
                 truncate_gradient = self.truncate_gradient,
-                outputs_info = [ beam_init_h ]
-
+                outputs_info = [ beam_init_h ] )
+        
+        beam_r = theano.ifelse.ifelse( T.le(self.story_idx, 0), \
+                beam_r[1:,:,:],\
+                beam_r)
         # Now, beam_r: seq+1 x dim x batch_size
-        beam_prob,_ = theano.scan(fn = lambda x: w: T.dot(w, x), sequences = beam_r, non_sequences = self.W_a)
+        beam_prob, _ = theano.scan(fn = lambda x, w: T.dot(w, x), sequences = beam_r, non_sequences = self.W_a)
         beam_preds = beam_prob.dimshuffle(2,0,1) # b * len * vocab
         beam_preds_rhp =  T.reshape(beam_preds, (beam_preds.shape[0] * beam_preds.shape[1], beam_preds.shape[2]))
         beam_preds_rhp_sm = nn_utils.softmax(beam_preds_rhp)
-        self.beam_pred = T.reshape(beam_preds_rhp_sm, (beam_preds_rhp_sm.shape[0], beam_preds_rhp_sm.shape[1], beam_preds_rhp_sm.shape[2]))
+        self.beam_pred = T.reshape(beam_preds_rhp_sm, (beam_preds.shape[0], beam_preds.shape[1], beam_preds.shape[2]))
 
         ###########################################################################################################
 
@@ -424,7 +427,7 @@ class DMN_batch:
     
         logging.info("compiling beam pred_fn")
         self.beam_pred_fn= theano.function(inputs=[self.input_var, self.q_var, self.answer_inp_var, self.init_h, self.story_idx],
-                                       outputs=[self.beam_pred, beam_r])
+                                       outputs=[self.beam_pred, beam_r.dimshuffle(2,0,1)])
 
     def GRU_update(self, h, x, W_res_in, W_res_hid, b_res,
                          W_upd_in, W_upd_hid, b_upd,
@@ -863,7 +866,7 @@ class DMN_batch:
                 "log": "pn: %.3f" % param_norm,
                 }
 
-    def step_beam(self, batch_index, beam_size = 5):
+    def step_beam(self, batch_index, beam_size = 4):
         '''
             This function is mainly for the testing stage.
             Use the beam search to generate the target captions from each image.
@@ -873,10 +876,11 @@ class DMN_batch:
         #q, ans, ans_inp, ans_mask, img_ids = self._process_batch_sind(batch_index, 'test')
         inp, q, ans, ans_inp, ans_mask, ans_idx, img_ids = self._process_batch_sind(batch_index, 'test')
         
+        batch_size = self.batch_size
         q_shape = q.shape[0]
         if q_shape < batch_size:
             q_ = np.zeros((self.batch_size, self.story_len, q.shape[2]), dtype = 'float32')
-            inp_ = np.zeros((self.batch_size, self.story_len, self.patches, self.cnn_dim), dtype = 'float32')
+            inp_ = np.zeros((self.batch_size, self.story_len, self.patches, self.cnn_dim_fc), dtype = 'float32')
             ans_idx_ = np.zeros((self.batch_size, ans_idx.shape[1]), dtype = 'float32')
             q_[0:q_shape,:,:] = q
             inp_[0:q_shape,:,:,:] = inp
@@ -889,29 +893,28 @@ class DMN_batch:
             inp = inp_
             ans_idx = ans_idx_
 
-        batch_size = self.batch_size
         init_h = None
-        beam_r = []
         captions = []
-        batch_of_beams = [ (0.0, [])  for i in range(batch_size) ]
-
+        batch_of_beams = [ [ (0.0, [])]  for i in range(batch_size) ]
+        beam_r = [ [] for i in range(batch_size) ]
         for story_idx in range(self.story_len):
             if story_idx == 0:
                 init_h = np.zeros((self.dim, self.batch_size), dtype = 'float32')
-            else:
-                # we need to obtain init_h from beam_r.
-                # prev_h = r[self.answer_idx[:,i],:,T.arange(self.batch_size)]
-                init_h = beam_r
             
             for bbeam in batch_of_beams:
-                bbeam[1].append(self.vocab_size)
-            pdb.set_trace()
+                for beam in bbeam:
+                    beam[1].append(self.vocab_size)
             #batch_of_beams = [ (0.0, [self.vocab_size])  for i in range(batch_size) ]
             nsteps = 0
+            cur_beam_r = None
+            if story_idx > 0:
+                cur_beam_r = beam_r
+                beam_r = [ [] for i in range(batch_size) ]
 
             while True:
-                #logging.info('nsteps = %d', nsteps)
+                logging.info('nsteps = %d', nsteps)
                 beam_c = [[] for i in range(batch_size) ]
+                beam_r_c = [ [] for i in range(batch_size) ]
                 idx_prevs = [ [] for i in range(batch_size)]
                 idx_of_idx = [ [] for i in range(batch_size)]
                 idx_of_idx_len = []
@@ -925,6 +928,7 @@ class DMN_batch:
                         if idx_prev[-1] == self.vocab['.']:
                             # This is the end.
                             beam_c[i].append(b)
+                            beam_r_c[i].append(beam_r[i][k])
                             continue
 
                         idx_prevs[i].append( idx_prev )
@@ -939,12 +943,16 @@ class DMN_batch:
                     break
                 
                 x_i = np.zeros((cnt_ins, max_b, self.word_vector_size), dtype = 'float32')
-                v_i = np.zeros((cnt_ins, inp.shape[1], self.cnn_dim), dtype = 'float32')
-                q_i = np.zeros((cnt_ins, self.cnn_dim), dtype='float32')
+                v_i = np.zeros((cnt_ins, self.story_len, inp.shape[2], self.cnn_dim), dtype = 'float32')
+                q_i = np.zeros((cnt_ins, self.story_len, self.cnn_dim_fc), dtype='float32')
+                beam_r_i = np.zeros((cnt_ins, self.dim), dtype = 'float32')
 
                 idx_base = 0
                 for j,idx_prev_j in enumerate(idx_prevs):
                     for m, idx_prev in enumerate(idx_prev_j):
+                        if story_idx > 0:
+                            #pdb.set_trace()
+                            beam_r_i[idx_base+m,:] = cur_beam_r[j][m]
                         for k in range(len(idx_prev)):
                             if idx_prev[k] ==self.vocab_size:
                                 x_i[m + idx_base,k,:] = utils.process_word2( word = "#START#",
@@ -959,14 +967,15 @@ class DMN_batch:
                                                                         word_vector_size = self.word_vector_size,
                                                                         to_return = 'word2vec' )
 
-                    q_i[idx_base:idx_base + len(idx_prev_j),:] = q[j,story_idx,:]
-                    v_i[idx_base:idx_base + len(idx_prev_j),:,:] = inp[j,story_idx,:,:]
+                    q_i[idx_base:idx_base + len(idx_prev_j),:,:] = q[j,:,:]
+                    v_i[idx_base:idx_base + len(idx_prev_j),:,:,:] = inp[j,:,:,:]
                     idx_base += len(idx_prev_j)
 
                 # This is really pain full.
                 # Since the batch_size is fixed when creating the module. Thus,
                 # we need to make them equal to the batch_size.
-                pred = np.zeros((cnn_ins, max_b, self.vocab_size + 1), dtype = 'float32')
+                pred = np.zeros((cnt_ins, max_b, self.vocab_size + 1), dtype = 'float32')
+                _beam_r = np.zeros((cnt_ins, max_b, self.dim), dtype = 'float32')
                 for i in range(0, v_i.shape[0], batch_size):
                     start_idx = i
                     end_idx = i + batch_size
@@ -982,15 +991,32 @@ class DMN_batch:
                         t_q_i[0:(end_idx - start_idx),:] = q_i[start_idx:end_idx,:]
                         t_x_i[0:(end_idx - start_idx),:,:] = x_i[start_idx:end_idx,:,:]
                         t_v_i[0:(end_idx - start_idx),:,:] = v_i[start_idx:end_idx,:,:]
-                        t,beam_r = theano_fn(t_v_i, t_q_i, t_x_i, init_h, story_idx)
+                        if story_idx > 0:
+                            init_h = beam_r_i[start_idx:end_idx,:]
+                            init_h = np.swapaxes(init_h, 0, 1)
+                        t = theano_fn(t_v_i, t_q_i, t_x_i, init_h, story_idx)
                         pred[start_idx:end_idx,:,:] = t[0][0:(end_idx-start_idx),:,:]
+                        _beam_r[start_idx:end_idx,:,:] = t[1][0:(end_idx - start_idx),:,:]
                     else:
-                        t,beam_r = theano_fn(v_i[start_idx:end_idx,:,:], q_i[start_idx:end_idx,:], x_i[start_idx:end_idx,:,:])
+                        #pdb.set_trace()
+                        x_ii = x_i[start_idx:end_idx,:,:]
+                        x_ii = x_ii[:,np.newaxis,:,:]
+                        x_ii = np.repeat(x_ii, self.story_len, axis = 1)
+                        x_ii = np.reshape(x_ii, (x_ii.shape[0] * x_ii.shape[1], x_ii.shape[2], x_ii.shape[3]))
+                        #pdb.set_trace()
+                        if story_idx > 0:
+                            init_h = beam_r_i[start_idx:end_idx,:]
+                            init_h = np.swapaxes(init_h, 0, 1)
+                        t = theano_fn(v_i[start_idx:end_idx,:,:], q_i[start_idx:end_idx,:], x_ii, init_h, story_idx)
+
                         pred[start_idx:end_idx,:,:] = t[0]
+                        _beam_r[start_idx:end_idx,:,:] = t[1]
 
                 p = np.zeros((pred.shape[0], pred.shape[2]))
+                _beam_r_p = np.zeros((_beam_r.shape[0], _beam_r.shape[2]))
                 for i in range(pred.shape[0]):
                     p[i,:] = pred[i,idx_of_idx_len[i]-1,:]
+                    _beam_r_p[i,:] = _beam_r[i, idx_of_idx_len[i]-1,:]
 
                 l = np.log( 1e-20 + p)
                 top_indices = np.argsort( -l, axis=-1)
@@ -1001,16 +1027,27 @@ class DMN_batch:
                         for m in range(beam_size):
                             wordix = top_indices[row_idx][m]
                             beam_c[batch_i].append((batch_of_beams[batch_i][idx][0] + l[row_idx][wordix], batch_of_beams[batch_i][idx][1] + [wordix]))
+                            beam_r_c[batch_i].append(_beam_r_p[row_idx,:])
                     idx_base += len(idx_i)
 
                 for i in range(len(beam_c)):
-                    beam_c[i].sort(reverse = True) # descreasing order.
-                for i, b in enumerate(beam_c):
-                    batch_of_beams[i] = beam_c[i][:beam_size]
-                nsteps += 1
-                if nsteps >= 20:
-                    break
+                    loss = []
+                    for li in beam_c[i]:
+                        loss.append(-1 * li[0])
+                    
+                    order = np.argsort(loss)
 
+                    batch_of_beams[i] = []
+                    beam_r[i] = []
+                    for j in range(beam_size):
+                        batch_of_beams[i].append(beam_c[i][order[j]])
+                        beam_r[i].append(beam_r_c[i][order[j]])
+                    
+                    #batch_of_beams[i] = beam_c[i][:beam_size]
+                nsteps += 1
+                if nsteps >= 10:
+                    break
+            
         for beams in batch_of_beams:
             pred = [(b[0], b[1]) for b in beams ]
             captions.append(pred)
